@@ -10,7 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
-    "test": "tsx test/smoke.ts"
+    "test": "tsx test/smoke.ts",
+    "test:integration": "tsx test/integration.ts",
+    "test:all": "tsx test/smoke.ts && tsx test/integration.ts"
   },
   "dependencies": {
     "@fastify/formbody": "^8.0.2",

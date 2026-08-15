@@ -6,7 +6,8 @@ import * as band from "../band/client.js";
 import * as linq from "../linq/client.js";
 import { design } from "../agents/designer.js";
 import { writeCopy, rewriteCta } from "../agents/copywriter.js";
-import { priceOrder, payMessage, TIERS, type Pricing } from "../agents/sales.js";
+import { priceOrder, TIERS, type Pricing } from "../agents/sales.js";
+import { payInstruction, offerConnect } from "../linq/agentpay.js";
 import { renderVariant } from "../builder/render.js";
 import type { Copy, VariantSpec } from "../builder/types.js";
 import { writeVariant, publish, writeSpec, writeSpecs, readSpecs, variantUrl } from "../deploy/sites.js";
@@ -236,7 +237,22 @@ export async function stepNotify(orderId: string) {
 
   const pricing = pricingFor(order);
   const study = latestStudySummary(orderId);
-  const lines = [payMessage(pricing, order.deploy_url)];
+
+  // Agent Pay when the handle is already connected, Stripe link otherwise.
+  const pay = await payInstruction({
+    handle: order.phone,
+    orderId,
+    amountCents: pricing.amountCents,
+    description: `LANDLINE — ${pricing.label} landing page`,
+    chatId: order.chat_id ?? undefined,
+  });
+
+  const lines = [
+    `Your page is live: ${order.deploy_url}`,
+    ``,
+    `${pricing.label} — ${pricing.blurb}`,
+    pay.text,
+  ];
   if (study?.source === "terac") {
     lines.push(``, `${Math.round((study.preference ?? 0) * 100)}% of real testers preferred this version.`);
   }
@@ -244,6 +260,12 @@ export async function stepNotify(orderId: string) {
   lines.push(``, `Want a change? Just text me, e.g. "make it darker".`);
 
   await linq.sendText(order.phone, lines.join("\n"), order.chat_id ?? undefined);
+
+  // If they can't Apple Pay yet, offer to connect them — after they've seen the page.
+  if (pay.rail !== "agent_pay") {
+    const offer = await offerConnect(order.phone, orderId);
+    if (offer) await linq.sendText(order.phone, offer, order.chat_id ?? undefined);
+  }
   await band.post({
     thread: order.band_thread_id!, from: "ceo", mentions: [], type: "shipped",
     body: `${order.deploy_url} at ${pricing.label}`, orderId,

@@ -261,6 +261,95 @@ section("10. PII scrub and dashboard");
   check("dashboard reports the pricing meta-study", typeof d.pricing_study.rate === "number");
 }
 
+// ------------------------------------------------------------- 11. Agent Pay
+section("11. Linq Agent Pay — the four-endpoint connect/charge flow");
+{
+  const { createServer } = await import("node:http");
+  const seen: { method: string; url: string; body: string }[] = [];
+
+  // Mock Linq. Confirms we call the documented routes in the documented order with
+  // the documented bodies — the real API is unavailable until the key lands.
+  const mock = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      seen.push({ method: req.method ?? "", url: req.url ?? "", body });
+      res.setHeader("content-type", "application/json");
+      if (/\/connect$/.test(req.url ?? "")) return res.end(JSON.stringify({ connect_id: "cs_01HZY8" }));
+      if (/\/verify$/.test(req.url ?? "")) {
+        const ok = JSON.parse(body || "{}").code === "482913";
+        res.statusCode = ok ? 200 : 400;
+        return res.end(JSON.stringify(ok ? { verified: true } : { error: "bad code" }));
+      }
+      if (/\/credentials$/.test(req.url ?? ""))
+        return res.end(JSON.stringify({ user_token: "ut_abc", fetch_url: "https://pay.linq.test/redeem/ut_abc" }));
+      if (/\/payments$/.test(req.url ?? "") && req.method === "POST")
+        return res.end(JSON.stringify({ id: "pay_123" }));
+      res.statusCode = 404;
+      res.end("{}");
+    });
+  });
+  await new Promise<void>((r) => mock.listen(4177, r));
+
+  const cfg = (await import("../src/config.js")).config;
+  cfg.linq.apiKey = "test-linq-key";
+  cfg.linq.baseUrl = "http://127.0.0.1:4177/v3";
+
+  const ap = await import("../src/linq/agentpay.js");
+  const handle = "+14155550777";
+  const id = "test-pay";
+  createOrder({ id, phone: handle, brief: BRIEF, slug: slugify(BRIEF, id) });
+  updateOrder(id, { deploy_url: "http://x/s/y", status: "live", amount_cents: 1900 });
+
+  check("handle starts unconnected", !ap.isConnected(handle));
+
+  const connectId = await ap.requestConnect(handle, id);
+  check("connect returns Linq's connect_id", connectId === "cs_01HZY8", String(connectId));
+  check("connect hits the documented route", seen.at(-1)?.url === `/v3/payments/handles/${encodeURIComponent(handle)}/connect`, seen.at(-1)?.url);
+  check("handle is now pending", ap.hasPendingConnect(handle));
+
+  check("a 6-digit text is recognised as a code", ap.looksLikeCode("482913") && !ap.looksLikeCode("make it darker"));
+
+  const badVerify = await ap.verifyConnect(handle, "000000", id);
+  check("wrong code is rejected", badVerify === false);
+  check("rejected code leaves the handle unconnected", !ap.isConnected(handle));
+
+  // A failed verify marks the connection failed, so re-request before the good code.
+  await ap.requestConnect(handle, id);
+  const goodVerify = await ap.verifyConnect(handle, "482913", id);
+  check("correct code verifies", goodVerify === true);
+  check("verify sends connect_id and code", JSON.parse(seen.at(-1)?.body ?? "{}").connect_id === "cs_01HZY8");
+  check("handle is now connected", ap.isConnected(handle));
+
+  const handoff = await ap.createAgentPayment({ handle, orderId: id, amountCents: 1900, description: "LANDLINE test" });
+  check("payment created", handoff?.linqPaymentId === "pay_123", JSON.stringify(handoff));
+  check("credentials fetched for the customer to redeem", handoff?.fetchUrl?.includes("pay.linq.test"), handoff?.fetchUrl);
+  const created = seen.find((s) => s.url === "/v3/payments" && s.method === "POST");
+  const createdBody = JSON.parse(created?.body ?? "{}");
+  check("payment body matches the documented shape",
+    createdBody.amount_cents === 1900 && createdBody.currency === "usd" && createdBody.merchant?.name === "LANDLINE",
+    created?.body);
+  check("payment row persisted", ap.paymentsForOrder(id).length === 1);
+
+  const pay = await ap.payInstruction({ handle, orderId: id, amountCents: 1900, description: "d" });
+  check("connected handle is offered Apple Pay", pay.rail === "agent_pay", `${pay.rail}: ${pay.text}`);
+
+  // Unconnected handle must still be sellable.
+  cfg.stripe.paymentLink = "https://buy.stripe.com/test";
+  const fallback = await ap.payInstruction({ handle: "+14155550888", orderId: id, amountCents: 900, description: "d" });
+  check("unconnected handle falls back to the Stripe link", fallback.rail === "stripe" && fallback.text.includes("buy.stripe.com"));
+
+  // Linq down entirely: never leave a customer with no way to pay.
+  cfg.linq.baseUrl = "http://127.0.0.1:1/v3";
+  const down = await ap.payInstruction({ handle: "+14155550999", orderId: id, amountCents: 900, description: "d" });
+  check("Linq outage still yields a payable link", down.rail === "stripe");
+  check("connect failure is survivable", (await ap.requestConnect("+14155550999", id)) === null);
+
+  await new Promise<void>((r) => mock.close(() => r()));
+  cfg.linq.apiKey = "";
+  cfg.stripe.paymentLink = "";
+}
+
 console.log(`\n${"─".repeat(60)}`);
 console.log(`${passed} passed, ${failed} failed, ${skipped.length} skipped`);
 if (skipped.length) console.log(`\nManual checks still required:\n${skipped.map((s) => `  · ${s}`).join("\n")}`);

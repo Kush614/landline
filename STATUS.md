@@ -1,6 +1,7 @@
 # LANDLINE — STATUS
 
-Last updated: P1 complete + Render Workflows wrapper. `npm test` → **49 passed, 0 failed, 3 skipped**.
+Last updated: P1 + Render Workflows + Agent Pay.
+`npm test` → **67 passed, 0 failed, 3 skipped** · `npm run test:integration` → **15 passed, 0 failed**.
 
 ## Where we are
 
@@ -12,15 +13,26 @@ Last updated: P1 complete + Render Workflows wrapper. `npm test` → **49 passed
 | P3 Terac | 🟡 code done, unverified | Study launch + poll + winner + 12-min fallback + background upgrade. Needs `TERAC_API_KEY` and enum verification (below). |
 | P4 Replay QA | 🟡 code done, unverified | Project create → poll → bugs → fix → re-run, max 3. Static-check fallback works today. Needs `REPLAY_API_KEY`. |
 | P5 Band | ✅ all 4 dependencies real | Kill-switch verified by test. Real-API posting needs `BAND_API_KEY` + `BAND_ROOM_ID`. |
-| P6 Linq polish | 🟡 partial | Send, webhook + signature verify, typing, tapback done. **iMessage App card and Agent Pay not built** — needs docs + key. |
+| P6 Linq polish | 🟡 mostly | Send, webhook + signature verify, typing, tapback, **Agent Pay (all 4 endpoints, 18 assertions vs a mock)** done. **iMessage App card still missing** — Linq publishes no schema for it. |
 | P7 Pioneer + Render Workflows | ✅ **code done** | Pipeline decomposed into 6 tasks in `src/pipeline/workflow.ts` + `render.yaml`. Pioneer copy + GLiNER2-PII wired with fallbacks. Needs a Render deploy to show run history. |
 | P8 Sell + light integrations | ⬜ not started | Dashboard JSON is live at `/api/dashboard`; Lovable page not built. |
 | P9 Freeze + submit | ⬜ not started | |
 
+## Agent Pay — the customer-facing flow
+
+Apple Pay inside the thread, settling to our Stripe account. Connecting a handle is a two-step dance that spans several inbound texts, so the pending state lives in `payment_connections`:
+
+1. We ship the page and send the price. If the handle isn't connected yet, we follow with: *"To pay with Apple Pay right here, text me back the 6-digit code Linq just sent you."*
+2. Customer texts `482913`. The webhook recognises a bare 6-digit number from a mid-connect handle **before** the revision and new-brief branches, so a code is never mistaken for a brief.
+3. Verified → we create the payment and reply with the Apple Pay handoff link.
+4. Texting `PAY` at any point re-requests a code or re-sends the pay link. A 👍 tapback on a live page also triggers the pay instruction.
+
+`payInstruction()` is the single place that decides the rail: Agent Pay if the handle is connected, Stripe link otherwise, and Stripe link again if Linq is unreachable. **A customer is never left without a way to pay.**
+
 ## What works right now, with no keys at all
 
 ```bash
-npm install && npm test          # 49 assertions
+npm install && npm run test:all  # 67 unit + 15 integration assertions
 npx tsx src/server.ts            # then POST a fake brief:
 curl -X POST localhost:3777/webhooks/linq -H 'content-type: application/json' \
   -d '{"data":{"chat_id":"c1","from":"+14155550001","parts":[{"type":"text","value":"a landing page for Fernway, a small-batch coffee roaster in Oakland"}]}}'
@@ -114,10 +126,36 @@ Roughly in order of how much they unblock:
 
 Drop them in `.env` and everything lights up — `/health` shows which sponsors are live.
 
+## Doc traps
+
+Every one of these cost real time. Written down so nobody on the team pays twice, and so judges can see where their own docs bite.
+
+**Render — the SDK import in the docs does not exist.** The Workflows tutorial shows `import { task } from '@renderinc/sdk'` and references a `@render/sdk` package. `@render/sdk` 404s on npm, and `task`/`startTaskServer` are *not* root exports. The truth, from the installed typings:
+```ts
+import { task, startTaskServer } from "@renderinc/sdk/workflows"; // not the root
+import { Render } from "@renderinc/sdk";                          // client is the root
+```
+Also: `RegisterTaskOptions` is `{name, timeoutSeconds, plan, retry:{maxRetries, waitDurationMs, backoffScaling}}` — `name` is required, and the task slug is `{workflow-slug}/{task-name}`.
+
+**Render — chained tasks don't share a filesystem or memory.** Each task run gets its own instance. Anything stateful (SQLite, an in-process message bus) has to live behind a service the tasks call, or every step after the first silently sees an empty world. This is why the pipeline is six steps that reload their own state.
+
+**Linq — no links in the first outbound message.** Sandbox rule. Our reply is a URL, so `linq/client.ts` tracks which chats we've already sent into and slips a link-free ack in first. Miss this and your very first customer message is silently rejected.
+
+**Linq — inbound-first.** Agents can't open a conversation; the customer must text the number first. Plan the demo around a judge texting in, not us texting out.
+
+**Linq — payments are only in `llms-full.txt`.** The public quickstart has no payments section at all. The connect/verify/credentials routes came from the LLM bundle; `POST /v3/payments` itself is inferred (the doc showed the body, not the route) and is env-overridable via `LINQ_PAYMENTS_PATH`.
+
+**Terac — the reference lists fields but not enum values.** `task_type` and `review_type` are required and undocumented. Guessing wrong = no human data all day, which is why that failure is now loud (see above).
+
+**Pioneer — two different auth headers in the same docs.** The authentication page says `X-API-Key`; the GLiNER2-PII example uses `Authorization: Bearer`. We send `X-API-Key` (it's the one the auth page and the OpenAPI spec agree on). If PII scrubbing 401s, try the Bearer form before assuming the key is bad.
+
+**Better-sqlite3 + `type: module`.** Needs `import Database from "better-sqlite3"` (default import); the named-import form typechecks under some configs and explodes at runtime.
+
 ## Known gaps and risks
 
 - **Terac `task_type` / `review_type` enums are unverified.** Their reference lists the fields but not the allowed values. Both are env-overridable (`TERAC_TASK_TYPE`, `TERAC_REVIEW_TYPE`). A wrong guess now raises a loud alarm rather than failing silently (see above), but it still means no human data. **Ask at the Terac booth — they're the host, it's a one-minute answer. First real study must be launched by 3pm.**
-- **Linq iMessage App cards and Agent Pay are undocumented in the public quickstart.** Agent Pay endpoints (`/v3/payments/handles/{handle}/connect|verify`, `POST` payment, `GET /credentials`) came from `llms-full.txt`; the card schema did not appear at all. Ask Linq in Discord.
+- **Agent Pay is wired but never run against real Linq.** All four endpoints are implemented and covered by 18 assertions against a mock that mimics the documented shapes, so the moment the key lands it either works or fails loudly in one place. Two unknowns remain: the create-payment route is inferred (`LINQ_PAYMENTS_PATH` overrides it) and the `user_token`/`fetch_url` handoff is documented as "for the agent to redeem" without saying how redemption surfaces in iMessage. **Ask Linq both.** Everything soft-fails to the Stripe link, so a wrong guess costs Apple Pay, not the sale.
+- **The iMessage App card has no published schema.** If Linq doesn't supply one, fall back to a rich-media message: preview screenshot + status line + pay link. Still demoable, and the screenshot needs Solari or a headless shot from the Superserve VM.
 - **Linq sandbox forbids links in the first outbound message.** Handled: `linq/client.ts` sends a link-free ack first and puts the URL in the next message.
 - **Render docs are wrong about the SDK import.** Their tutorial shows `import { task } from '@renderinc/sdk'` and a `@render/sdk` package. Neither exists: the package is `@renderinc/sdk` and `task`/`startTaskServer` are exported from **`@renderinc/sdk/workflows`**. Verified against the installed typings, not the docs.
 - **No screenshots yet** — the study page uses live iframes instead. Fine, arguably better, but Solari/headless screenshots would look better in the Terac task preview.

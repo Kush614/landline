@@ -63,6 +63,31 @@ CREATE TABLE IF NOT EXISTS events (
   ts TEXT NOT NULL
 );
 
+-- Linq Agent Pay: connecting a handle is a two-step dance (request a code, then
+-- verify the code the customer texts back), so the pending state has to outlive
+-- the request that started it.
+CREATE TABLE IF NOT EXISTS payment_connections (
+  handle TEXT PRIMARY KEY,
+  connect_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  requested_at TEXT NOT NULL,
+  verified_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS payments (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL,
+  handle TEXT NOT NULL,
+  linq_payment_id TEXT,
+  amount_cents INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'created',
+  fetch_url TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id);
+
 CREATE TABLE IF NOT EXISTS votes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   order_id TEXT NOT NULL,
@@ -156,6 +181,71 @@ export function upsertVariant(v: Variant) {
 
 export const variantsFor = (orderId: string) =>
   db.prepare(`SELECT * FROM variants WHERE order_id = ? ORDER BY idx`).all(orderId) as Variant[];
+
+export interface PaymentConnection {
+  handle: string;
+  connect_id: string | null;
+  status: "pending" | "verified" | "failed";
+  requested_at: string;
+  verified_at: string | null;
+}
+
+export const getConnection = (handle: string) =>
+  db.prepare(`SELECT * FROM payment_connections WHERE handle = ?`).get(handle) as
+    | PaymentConnection
+    | undefined;
+
+export function upsertConnection(handle: string, patch: Partial<PaymentConnection>) {
+  const existing = getConnection(handle);
+  if (existing) {
+    const keys = Object.keys(patch);
+    if (!keys.length) return;
+    db.prepare(
+      `UPDATE payment_connections SET ${keys.map((k) => `${k} = @${k}`).join(", ")} WHERE handle = @handle`,
+    ).run({ ...patch, handle });
+    return;
+  }
+  db.prepare(
+    `INSERT INTO payment_connections (handle, connect_id, status, requested_at, verified_at)
+     VALUES (@handle, @connect_id, @status, @requested_at, @verified_at)`,
+  ).run({
+    handle,
+    connect_id: patch.connect_id ?? null,
+    status: patch.status ?? "pending",
+    requested_at: patch.requested_at ?? now(),
+    verified_at: patch.verified_at ?? null,
+  });
+}
+
+export interface Payment {
+  id: string;
+  order_id: string;
+  handle: string;
+  linq_payment_id: string | null;
+  amount_cents: number;
+  status: string;
+  fetch_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function createPayment(p: Omit<Payment, "created_at" | "updated_at">) {
+  db.prepare(
+    `INSERT INTO payments (id, order_id, handle, linq_payment_id, amount_cents, status, fetch_url, created_at, updated_at)
+     VALUES (@id, @order_id, @handle, @linq_payment_id, @amount_cents, @status, @fetch_url, @ts, @ts)`,
+  ).run({ ...p, ts: now() });
+}
+
+export function updatePayment(id: string, patch: Partial<Payment>) {
+  const keys = Object.keys(patch);
+  if (!keys.length) return;
+  db.prepare(
+    `UPDATE payments SET ${keys.map((k) => `${k} = @${k}`).join(", ")}, updated_at = @updated_at WHERE id = @id`,
+  ).run({ ...patch, id, updated_at: now() });
+}
+
+export const paymentsFor = (orderId: string) =>
+  db.prepare(`SELECT * FROM payments WHERE order_id = ? ORDER BY created_at DESC`).all(orderId) as Payment[];
 
 export interface StudyRow {
   id: string;

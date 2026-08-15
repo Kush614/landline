@@ -10,6 +10,7 @@ import {
   votesFor,
 } from "./db.js";
 import * as linq from "./linq/client.js";
+import * as agentpay from "./linq/agentpay.js";
 import { intake, buildAndShip, revise } from "./pipeline/run.js";
 import { STEPS, STEP_FNS, type StepName } from "./pipeline/steps.js";
 import { readSite } from "./deploy/sites.js";
@@ -113,13 +114,14 @@ async function handleInbound(msg: linq.InboundMessage) {
     logDecision({ agent: "ceo", type: "tapback", input: phone, output: msg.reaction });
     const prior = latestOrderForPhone(phone);
     if (prior?.status === "live" && /👍|like|love|❤️/.test(msg.reaction ?? "")) {
-      await linq.sendText(
-        phone,
-        config.stripe.paymentLink
-          ? `Glad you like it. Pay here and it's yours: ${config.stripe.paymentLink}`
-          : `Glad you like it.`,
-        prior.chat_id ?? chatId,
-      );
+      const pay = await agentpay.payInstruction({
+        handle: phone,
+        orderId: prior.id,
+        amountCents: prior.amount_cents || 900,
+        description: `LANDLINE — ${prior.slug}`,
+        chatId: prior.chat_id ?? chatId,
+      });
+      await linq.sendText(phone, `Glad you like it. ${pay.text}`, prior.chat_id ?? chatId);
     }
     return;
   }
@@ -127,6 +129,55 @@ async function handleInbound(msg: linq.InboundMessage) {
   if (!text) return;
 
   const prior = latestOrderForPhone(phone);
+
+  // A bare 6-digit number is never a brief — it's an Agent Pay code, ours or a stray.
+  // Handled before the revision and new-order branches so we never build a page
+  // called "482913".
+  if (agentpay.looksLikeCode(text)) {
+    if (!agentpay.hasPendingConnect(phone)) {
+      await linq.sendText(
+        phone,
+        prior
+          ? "I wasn't expecting a code — text PAY if you want to set up Apple Pay, or describe a change to your page."
+          : "That looks like a verification code, but I don't have anything pending for you. Text me a description of the page you want and I'll build it.",
+        prior?.chat_id ?? chatId,
+      );
+      return;
+    }
+    const ok = await agentpay.verifyConnect(phone, text.trim(), prior?.id);
+    if (!ok) {
+      await linq.sendText(phone, "That code didn't work — text PAY and I'll send a fresh one.", prior?.chat_id ?? chatId);
+      return;
+    }
+    if (prior?.deploy_url && prior.status === "live") {
+      const pay = await agentpay.payInstruction({
+        handle: phone,
+        orderId: prior.id,
+        amountCents: prior.amount_cents || 900,
+        description: `LANDLINE — ${prior.slug}`,
+        chatId: prior.chat_id ?? chatId,
+      });
+      await linq.sendText(phone, `Apple Pay is set up. ${pay.text}`, prior.chat_id ?? chatId);
+    } else {
+      await linq.sendText(phone, "Apple Pay is set up — I'll send the request when your page is ready.", prior?.chat_id ?? chatId);
+    }
+    return;
+  }
+
+  // Explicit re-request of a connect code.
+  if (/^\s*pay\s*$/i.test(text) && prior) {
+    const offer = await agentpay.offerConnect(phone, prior.id);
+    const pay = offer
+      ? offer
+      : (await agentpay.payInstruction({
+          handle: phone,
+          orderId: prior.id,
+          amountCents: prior.amount_cents || 900,
+          description: `LANDLINE — ${prior.slug}`,
+        })).text;
+    await linq.sendText(phone, pay, prior.chat_id ?? chatId);
+    return;
+  }
   const isRevision =
     !!prior &&
     ["live", "failed"].includes(prior.status) &&
@@ -139,7 +190,9 @@ async function handleInbound(msg: linq.InboundMessage) {
   }
 
   const order = await intake(phone, text, chatId);
-  if (order) await buildAndShip(order);
+  // PIPELINE_AUTORUN=false leaves the order at intake for an external driver — the
+  // Render Workflow, a manual retry, or the integration test.
+  if (order && process.env.PIPELINE_AUTORUN !== "false") await buildAndShip(order);
 }
 
 // ---- hosted customer sites ----
@@ -205,13 +258,15 @@ app.post<{ Params: { orderId: string }; Body: Record<string, string> }>(
  * re-runnable, so Render's retries are safe. Guarded by a shared token — the workflow
  * runs outside this service's private network.
  */
+function internalOk(req: { headers: Record<string, unknown> }): boolean {
+  const expected = process.env.INTERNAL_TOKEN;
+  return !expected || req.headers["x-internal-token"] === expected;
+}
+
 app.post<{ Params: { step: string }; Body: { orderId?: string } }>(
   "/internal/steps/:step",
   async (req, reply) => {
-    const expected = process.env.INTERNAL_TOKEN;
-    if (expected && req.headers["x-internal-token"] !== expected) {
-      return reply.code(401).send({ error: "bad internal token" });
-    }
+    if (!internalOk(req)) return reply.code(401).send({ error: "bad internal token" });
     const step = req.params.step as StepName;
     if (!STEPS.includes(step)) return reply.code(404).send({ error: `unknown step ${step}` });
 
@@ -228,6 +283,31 @@ app.post<{ Params: { step: string }; Body: { orderId?: string } }>(
     }
   },
 );
+
+/** Most recent order for a handle — the lookup the revision path already relies on. */
+app.get<{ Params: { phone: string } }>("/internal/orders/by-phone/:phone", async (req, reply) => {
+  if (!internalOk(req)) return reply.code(401).send({ error: "bad internal token" });
+  const order = latestOrderForPhone(decodeURIComponent(req.params.phone));
+  if (!order) return reply.code(404).send({ error: "not found" });
+  return { order, variants: variantsFor(order.id) };
+});
+
+/** Order state, for the workflow driver and for operational debugging. */
+app.get<{ Params: { id: string } }>("/internal/orders/:id", async (req, reply) => {
+  if (!internalOk(req)) return reply.code(401).send({ error: "bad internal token" });
+  const order = getOrder(req.params.id);
+  if (!order) return reply.code(404).send({ error: "not found" });
+  return { order, variants: variantsFor(order.id), payments: agentpay.paymentsForOrder(order.id) };
+});
+
+/** Run the remaining pipeline in-process — the manual-retry path for a stuck order. */
+app.post<{ Params: { id: string } }>("/internal/orders/:id/run", async (req, reply) => {
+  if (!internalOk(req)) return reply.code(401).send({ error: "bad internal token" });
+  const order = getOrder(req.params.id);
+  if (!order) return reply.code(404).send({ error: "not found" });
+  await buildAndShip(order);
+  return { order: getOrder(order.id) };
+});
 
 // ---- dashboard feed (consumed by the Lovable page) ----
 app.get("/api/dashboard", async (_req, reply) => {

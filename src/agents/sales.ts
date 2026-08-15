@@ -61,14 +61,4 @@ export async function priceOrder(thread: string, orderId: string): Promise<Prici
   return pricing;
 }
 
-export function payMessage(pricing: Pricing, url: string): string {
-  const link = config.stripe.paymentLink;
-  return [
-    `Your page is live: ${url}`,
-    ``,
-    `${pricing.label} — ${pricing.blurb}`,
-    link ? `Pay here: ${link}` : `(payment link not configured yet)`,
-  ].join("\n");
-}
-
 export { TIERS };
