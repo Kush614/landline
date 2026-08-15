@@ -214,6 +214,13 @@ export async function runStudy(input: {
   const already = humanResult(null);
   if (already) return already;
 
+  // Seeded demo orders never spend. They carry synthetic votes already, and a
+  // paid panel for a fictional business is money on fire.
+  if (order.is_seed) {
+    logDecision({ agent: "ceo", type: "study_skipped_seed", orderId: order.id, output: "seeded order — no Terac spend" });
+    return modelResult(null);
+  }
+
   if (!has.terac()) {
     alarm("no_api_key", "TERAC_API_KEY is unset — no study will be launched for this order.", order.id);
     return modelResult(null);
