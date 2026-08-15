@@ -69,9 +69,20 @@ async function ensureProject(orderId?: string): Promise<string | null> {
  * That keeps the question set (§5.1) under our control and gives us structured
  * results regardless of Terac's own question schema.
  */
+/**
+ * Terac charges per participant (~$4.50 at the time of writing), and we launch a
+ * study per shipped site. An unattended pipeline that spends real money per inbound
+ * text is a foot-gun, so we create the opportunity as a DRAFT first, read the price
+ * Terac quotes back, and only launch if it's within budget.
+ */
+const MAX_COST_CENTS = Number(process.env.TERAC_MAX_COST_CENTS ?? 2500);
+
 async function launchOpportunity(order: Order, projectId: string): Promise<string | null> {
   try {
-      const created = await req<{ id: string }>(`${config.terac.baseUrl}/opportunities`, {
+      const created = await req<{
+        id: string;
+        pricing?: { total_cost_cents?: number; cost_per_participant_cents?: number };
+      }>(`${config.terac.baseUrl}/opportunities`, {
         method: "POST",
         headers: headers(),
         body: JSON.stringify({
@@ -80,15 +91,20 @@ async function launchOpportunity(order: Order, projectId: string): Promise<strin
           internal_title: `landline ${order.slug}`,
           description:
             "You'll see three versions of the same one-page website. Tell us which one you would click, which headline is clearest, and how much you trust it. Takes about 2 minutes.",
-          num_participants: Number(process.env.TERAC_PARTICIPANTS ?? 30),
+          // Small on purpose: Terac bills per participant and we run a study per
+          // shipped site. Enough for a signal, not enough to burn the budget.
+          num_participants: Number(process.env.TERAC_PARTICIPANTS ?? 5),
           business_type: "b2c",
           unrestricted_audience: true,
-          expected_days_to_complete: 1,
+          expected_days_to_complete: 5, // API minimum
           tasks: [
             {
               sequence: 1,
-              task_type: process.env.TERAC_TASK_TYPE ?? "unmoderated_task",
-              review_type: process.env.TERAC_REVIEW_TYPE ?? "auto",
+              // Enum values confirmed against the live API, not guessed:
+              // task_type   = interview | file_upload | activity
+              // review_type = auto_approve | manual_review | self_report
+              task_type: process.env.TERAC_TASK_TYPE ?? "activity",
+              review_type: process.env.TERAC_REVIEW_TYPE ?? "auto_approve",
               task_url: `${config.baseUrl}/study/${order.id}`,
               participant_url_template: `${config.baseUrl}/study/${order.id}?p={participant_id}`,
               title: "Compare three landing pages",
@@ -103,17 +119,35 @@ async function launchOpportunity(order: Order, projectId: string): Promise<strin
       return null;
     }
 
+    // Spend gate. The draft exists either way — a human can launch it from the
+    // Terac dashboard — but the pipeline will not spend above the cap on its own.
+    const cost = created.pricing?.total_cost_cents ?? 0;
+    if (cost > MAX_COST_CENTS) {
+      alarm(
+        "cost_gate",
+        `Terac quoted $${(cost / 100).toFixed(2)} for opportunity ${created.id}, above the $${(MAX_COST_CENTS / 100).toFixed(2)} cap. Draft saved but NOT launched — launch it by hand or raise TERAC_MAX_COST_CENTS.`,
+        order.id,
+      );
+      return null;
+    }
+
     await req(`${config.terac.baseUrl}/opportunities/${created.id}/launch`, {
       method: "POST",
       headers: headers(),
       body: "{}",
+    });
+    logDecision({
+      agent: "ceo",
+      type: "terac_launched",
+      orderId: order.id,
+      output: { id: created.id, costCents: cost, participants: Number(process.env.TERAC_PARTICIPANTS ?? 5) },
     });
     return created.id;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // A 4xx here almost certainly means our task_type/review_type guess is wrong.
     const enumHint = /400|422/.test(msg)
-      ? ` — likely a bad TERAC_TASK_TYPE ("${process.env.TERAC_TASK_TYPE ?? "unmoderated_task"}") or TERAC_REVIEW_TYPE ("${process.env.TERAC_REVIEW_TYPE ?? "auto"}"). ASK AT THE TERAC BOOTH.`
+      ? ` — check TERAC_TASK_TYPE ("${process.env.TERAC_TASK_TYPE ?? "activity"}") must be interview|file_upload|activity, and TERAC_REVIEW_TYPE ("${process.env.TERAC_REVIEW_TYPE ?? "auto_approve"}") must be auto_approve|manual_review|self_report.`
       : "";
     alarm("launchOpportunity", `${msg}${enumHint}`, order.id);
     return null;
