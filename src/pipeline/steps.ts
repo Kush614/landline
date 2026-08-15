@@ -88,6 +88,7 @@ export async function stepDesignCopy(orderId: string) {
   const copies = await Promise.all([0, 1, 2].map((a) => writeCopy(brief, a, orderId)));
   const specs: VariantSpec[] = d.layouts.map((l, i) => ({
     idx: i, label: l.label, layout: l.layout, palette: l.palette, font: l.font,
+    brief,
     copy: { ...copies[i], pricing: pricingBlock },
   }));
   writeSpecs(order.slug!, specs);

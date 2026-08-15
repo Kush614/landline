@@ -1,5 +1,6 @@
 import type { VariantSpec } from "./types.js";
 import { FONTS } from "./palettes.js";
+import { heroMotif } from "./motif.js";
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -50,11 +51,12 @@ h2{font-size:clamp(1.5rem,3.6vw,2.125rem);letter-spacing:-.02em;margin:0 0 2rem;
 .cta p{color:var(--muted);margin:0 0 1.75rem;max-width:44ch;margin-inline:auto}
 footer{border-top:1px solid var(--border);padding:2rem 0 3rem;color:var(--muted);font-size:.875rem}
 .embed{margin-top:1.5rem}
+.panel{display:none}
+.motif{display:block;width:100%;height:100%}
 @media(min-width:44rem){
   .grid{grid-template-columns:repeat(3,1fr)}
   .split{display:grid;grid-template-columns:1.05fr .95fr;gap:3rem;align-items:center}
-  .panel{aspect-ratio:4/3;border-radius:1.125rem;border:1px solid var(--border);
-    background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 22%,var(--surface)),var(--surface))}
+  .panel{display:block;aspect-ratio:4/3.1}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 `.trim();
@@ -71,7 +73,7 @@ footer{border-top:1px solid var(--border);padding:2rem 0 3rem;color:var(--muted)
 
   const hero =
     layout === "split"
-      ? `<header class="hero"><div class="wrap"><div class="split"><div>${heroInner}</div><div class="panel" role="img" aria-label="${esc(c.brand)} preview"></div></div></div></header>`
+      ? `<header class="hero"><div class="wrap"><div class="split"><div>${heroInner}</div><div class="panel">${heroMotif(p, c.brand, spec.brief ?? c.subhead)}</div></div></div></header>`
       : layout === "editorial"
         ? `<header class="hero"><div class="wrap" style="max-width:48rem">${heroInner}</div></header>`
         : `<header class="hero"><div class="wrap" style="text-align:center">${heroInner.replace('class="sub"', 'class="sub" style="margin-inline:auto"')}</div></header>`;

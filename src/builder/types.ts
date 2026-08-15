@@ -27,6 +27,8 @@ export interface Palette {
 export interface VariantSpec {
   idx: number;
   label: string;
+  /** The scrubbed brief, so the hero motif can suit the business. */
+  brief?: string;
   layout: LayoutName;
   palette: Palette;
   font: string;

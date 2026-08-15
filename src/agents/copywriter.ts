@@ -22,8 +22,10 @@ function subjectOf(brief: string): string {
   );
   s = s.replace(/^\s*(?:a|an|the)\s+/i, "");
   s = s.replace(/^\s*(?:simple|clean|nice|quick|basic|modern|one[- ]page|single[- ]page)\s+/i, "");
-  s = s.replace(/^\s*(?:landing\s+page|website|web\s*site|web\s*page|site|page)\s+(?:for|about|to promote)\s+/i, "");
-  s = s.replace(/^\s*(?:a|an|the)\s+/i, "");
+  s = s.replace(/^\s*(?:landing\s+page|website|web\s*site|web\s*page|site|page)\s*/i, "");
+  // "one page for a two-person studio" leaves a dangling "for" once the page word goes.
+  s = s.replace(/^\s*(?:for|about|to\s+promote|promoting)\s+/i, "");
+  s = s.replace(/^\s*(?:a|an|the|my|our)\s+/i, "");
   // Split on sentence ends only — a comma usually separates the name from its
   // description ("Fernway, a coffee roaster"), which is exactly what we want to keep.
   return s.split(/[.\n]/)[0].trim() || "your business";
@@ -34,7 +36,12 @@ function subjectOf(brief: string): string {
  * the hassle". Falls back to a word boundary, then a hard slice.
  */
 function clip(s: string, max: number): string {
-  const clause = s.search(/,| that | which | who | and | where | so that /i);
+  // Participles are the common mid-phrase trap: "…engineering studio taking on
+  // seismic" reads as a truncation, where "…engineering studio" reads as finished.
+  // Prepositions like "in" are deliberately absent — "roaster in Oakland" is fine.
+  const clause = s.search(
+    /,| that | which | who | and | where | so that | taking | offering | serving | providing | specialou?s|specialis|specializ| helping | working /i,
+  );
   let out = clause > 12 ? s.slice(0, clause) : s;
   if (out.length > max) {
     const cut = out.slice(0, max);
@@ -54,8 +61,14 @@ function fallbackCopy(brief: string, angle: number): Copy {
   const short = clip(descriptor, 42);
 
   // Brand-anchored on purpose: the fallback runs when Pioneer is down, so it has to
-  // read cleanly for any brief rather than cleverly for some.
-  const heads = [`${brand}, done properly`, `${brand} without the hassle`, `${brand}: ${short}`];
+  // read cleanly for any brief rather than cleverly for some. Drop the prefix when
+  // the descriptor already contains the brand — "Studio: …engineering studio".
+  const echoes = short.toLowerCase().includes(brand.toLowerCase());
+  const heads = [
+    `${brand}, done properly`,
+    `${brand} without the hassle`,
+    echoes ? cap(short) : `${brand}: ${short}`,
+  ];
   const subs = [
     `Everything you need from ${brand}. Nothing you don't.`,
     `Built for people who want ${clip(descriptor, 60)} sorted today, not next quarter.`,
@@ -78,7 +91,14 @@ function fallbackCopy(brief: string, angle: number): Copy {
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-const STOPWORDS = new Set(["I", "We", "My", "The", "A", "An", "Hi", "Hey", "Hello", "Please", "Can", "Could"]);
+const STOPWORDS = new Set([
+  "I", "We", "My", "The", "A", "An", "Hi", "Hey", "Hello", "Please", "Can", "Could",
+  // Capitalised words that are almost always part of a place, not a business name.
+  // "…retrofits in the East Bay" used to yield the brand "East".
+  "East", "West", "North", "South", "Bay", "Area", "City", "County", "Street", "Ave",
+  "Avenue", "Road", "Valley", "Heights", "Park", "Downtown", "Monday", "Tuesday",
+  "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+]);
 
 function guessBrand(brief: string): string {
   const quoted = brief.match(/["“']([^"”']{2,30})["”']/);

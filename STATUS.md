@@ -89,6 +89,20 @@ Two sources, in order. **Headless Chromium inside the customer's Superserve VM**
 
 Never throws: no screenshot just means the study page uses an iframe and the reply is text-only. Set `SHOTS_ENABLED=false` to skip entirely.
 
+## The hero visual
+
+The split layout used to have an empty gradient rectangle where a product shot would
+go — the weakest thing on the page. We can't source photography for an arbitrary
+business and stock imagery would be worse, so `src/builder/motif.ts` generates an
+abstract composition from the page's own palette: inline SVG, no extra request,
+renders identically in a screenshot, `aria-hidden` because it's decorative.
+
+Four motifs, chosen by what the business is and falling back to a hash of the brand
+so two coffee shops don't get the same page: **stack** (offset cards — shops and
+subscriptions), **field** (dot grid + block — technical and software), **overlap**
+(two circles with the intersection picked out as a solid lens — food, salons, crafts),
+**arcs** (concentric sweeps — the general fallback).
+
 ## The brief gate
 
 A phone number is the whole storefront, so anything a stranger types arrives at `intake`. Without a gate, a judge texting "cool" during judging spawns a site called *cool*. `src/agents/intent.ts` classifies every inbound message into `brief | revision | pay | code | chitchat`:
