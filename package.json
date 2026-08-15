@@ -19,12 +19,12 @@
     "@fastify/formbody": "^8.0.2",
     "@renderinc/sdk": "^0.6.0",
     "better-sqlite3": "^11.8.1",
-    "fastify": "^5.2.1"
+    "fastify": "^5.2.1",
+    "playwright": "^1.62.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.1",
-    "playwright": "^1.62.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }
