@@ -97,6 +97,25 @@ async function launchOpportunity(order: Order, projectId: string): Promise<strin
           business_type: "b2c",
           unrestricted_audience: true,
           expected_days_to_complete: 5, // API minimum
+          // Terac refuses to launch an opportunity with no screener (412). Values
+          // confirmed against the live API:
+          //   pick          = one | any | boolean | text | grid
+          //   qualify_logic = may | must | must_one_of | reject | review
+          // Deliberately inclusive — we want the general population, and the only
+          // people we genuinely can't use are those who never look at these sites.
+          screening_questions: [
+            {
+              key: "visits_small_business_sites",
+              text: "How often do you look at the website of a small or local business — a cafe, salon, studio, or tradesperson?",
+              pick: "one",
+              answers: [
+                { text: "At least once a week", qualify_logic: "may", allow_free_text: false },
+                { text: "A few times a month", qualify_logic: "may", allow_free_text: false },
+                { text: "A few times a year", qualify_logic: "may", allow_free_text: false },
+                { text: "Never — I don't visit these sites", qualify_logic: "reject", allow_free_text: false },
+              ],
+            },
+          ],
           tasks: [
             {
               sequence: 1,
