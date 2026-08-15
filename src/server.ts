@@ -282,9 +282,19 @@ app.post<{ Params: { orderId: string }; Body: Record<string, string> }>(
  * re-runnable, so Render's retries are safe. Guarded by a shared token — the workflow
  * runs outside this service's private network.
  */
+/**
+ * Fail closed. These endpoints create orders, expose customer phone numbers and
+ * briefs, and can trigger pipeline steps that spend real Terac credits — so a
+ * missing INTERNAL_TOKEN must deny, not allow. The only exception is a locally
+ * bound dev server, where requiring a token would just break `npm run seed-demo`
+ * for no security benefit.
+ */
+const IS_LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(config.baseUrl);
+
 function internalOk(req: { headers: Record<string, unknown> }): boolean {
   const expected = process.env.INTERNAL_TOKEN;
-  return !expected || req.headers["x-internal-token"] === expected;
+  if (!expected) return IS_LOCAL;
+  return req.headers["x-internal-token"] === expected;
 }
 
 app.post<{ Params: { step: string }; Body: { orderId?: string } }>(
