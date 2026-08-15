@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS orders (
   compliance_reason TEXT,
   winner_idx INTEGER,
   qa_status TEXT,
+  is_seed INTEGER DEFAULT 0,
   stripe_paid INTEGER DEFAULT 0,
   amount_cents INTEGER DEFAULT 0,
   created_at TEXT NOT NULL,
@@ -105,6 +106,22 @@ CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(phone);
 CREATE INDEX IF NOT EXISTS idx_variants_order ON variants(order_id);
 `);
 
+/**
+ * CREATE TABLE IF NOT EXISTS won't add columns to a database that already exists,
+ * so a dev box or a Render disk from an earlier deploy needs these applied by hand.
+ * Adding a column that's already there throws; that's the expected no-op.
+ */
+for (const [table, column, ddl] of [
+  ["orders", "winner_idx", "INTEGER"],
+  ["orders", "qa_status", "TEXT"],
+  ["orders", "is_seed", "INTEGER DEFAULT 0"],
+] as const) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  }
+}
+
 export interface Order {
   id: string;
   phone: string;
@@ -122,6 +139,7 @@ export interface Order {
   compliance_reason: string | null;
   winner_idx: number | null;
   qa_status: string | null;
+  is_seed: number;
   stripe_paid: number;
   amount_cents: number;
   created_at: string;

@@ -72,6 +72,13 @@ export function readSpec<T>(slug: string): T | null {
   }
 }
 
+/** Screenshot bytes for a variant, if one was captured. */
+export function readShot(slug: string, idx: number): Buffer | null {
+  const path = resolve(dir(slug), `v${idx}.png`);
+  if (!path.startsWith(SITES_DIR) || !existsSync(path)) return null;
+  return readFileSync(path);
+}
+
 export function readSite(slug: string, file = "index.html"): string | null {
   const path = resolve(dir(slug), file);
   if (!path.startsWith(SITES_DIR) || !existsSync(path)) return null;

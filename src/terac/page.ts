@@ -8,15 +8,26 @@ const esc = (s: string) =>
  * The page Terac panelists land on. Five questions (§5.1), three live variants in
  * iframes so testers judge the real page, not a screenshot.
  */
-export function studyPage(orderId: string, variants: Variant[], headlines: string[]): string {
+export function studyPage(
+  orderId: string,
+  variants: Variant[],
+  headlines: string[],
+  shotUrls: (string | null)[] = [],
+): string {
   const cards = variants
-    .map(
-      (v, i) => `
+    .map((v, i) => {
+      const shot = shotUrls[i];
+      // Screenshot when we have one (fast, and what §5.1 asks panelists to compare);
+      // a live iframe when we don't, so the study is never blank.
+      const media = shot
+        ? `<img src="${esc(shot)}" alt="Version ${i + 1} of the landing page" loading="lazy">`
+        : `<iframe src="${esc(v.preview_url ?? "")}" title="Version ${i + 1}" loading="lazy"></iframe>`;
+      return `
     <figure class="card">
       <figcaption><b>Version ${i + 1}</b> <a href="${esc(v.preview_url ?? "#")}" target="_blank" rel="noopener">open full size ↗</a></figcaption>
-      <div class="frame"><iframe src="${esc(v.preview_url ?? "")}" title="Version ${i + 1}" loading="lazy"></iframe></div>
-    </figure>`,
-    )
+      <div class="frame${shot ? " shot" : ""}">${media}</div>
+    </figure>`;
+    })
     .join("");
 
   const radios = (name: string, legend: string) => `
@@ -48,6 +59,8 @@ h1{font-size:1.5rem;letter-spacing:-.02em;margin:0 0 .35rem}
 figcaption{display:flex;justify-content:space-between;align-items:center;padding:.6rem .85rem;border-bottom:1px solid var(--border);font-size:.9rem}
 figcaption a{color:var(--accent)}
 .frame{height:26rem;overflow:hidden;background:#fff}
+.frame.shot{display:block}
+.frame img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block}
 iframe{width:200%;height:52rem;border:0;transform:scale(.5);transform-origin:0 0}
 form{margin-top:2rem;background:var(--surface);border:1px solid var(--border);border-radius:.75rem;padding:1.25rem}
 fieldset{border:0;padding:0;margin:0 0 1.5rem}

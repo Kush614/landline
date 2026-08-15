@@ -6,6 +6,7 @@ import {
   getOrder,
   latestOrderForPhone,
   recordVote,
+  updateOrder,
   variantsFor,
   votesFor,
 } from "./db.js";
@@ -13,9 +14,11 @@ import * as linq from "./linq/client.js";
 import * as agentpay from "./linq/agentpay.js";
 import { intake, buildAndShip, revise } from "./pipeline/run.js";
 import { STEPS, STEP_FNS, type StepName } from "./pipeline/steps.js";
-import { readSite } from "./deploy/sites.js";
+import { readSite, readShot } from "./deploy/sites.js";
 import { studyPage, thanksPage } from "./terac/page.js";
 import { dashboard } from "./dashboard/data.js";
+import { classifyAndLog } from "./agents/intent.js";
+import { shotExists, shotUrl } from "./shots/capture.js";
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL ?? "info" },
@@ -86,7 +89,6 @@ app.get("/health", async () => {
   };
 });
 
-const REVISION_HINT = /\b(make|change|add|remove|swap|darker|lighter|bigger|smaller|update|instead|move|rename|headline|button|cta|color|colour)\b/i;
 
 app.post("/webhooks/linq", async (request, reply) => {
   const raw = (request as any).rawBody ?? JSON.stringify(request.body ?? {});
@@ -129,70 +131,82 @@ async function handleInbound(msg: linq.InboundMessage) {
   if (!text) return;
 
   const prior = latestOrderForPhone(phone);
+  const replyTo = prior?.chat_id ?? chatId;
+  const intent = classifyAndLog(text, {
+    phone,
+    hasPriorOrder: !!prior,
+    priorIsLive: !!prior && ["live", "failed"].includes(prior.status),
+  });
 
-  // A bare 6-digit number is never a brief — it's an Agent Pay code, ours or a stray.
-  // Handled before the revision and new-order branches so we never build a page
-  // called "482913".
-  if (agentpay.looksLikeCode(text)) {
-    if (!agentpay.hasPendingConnect(phone)) {
-      await linq.sendText(
-        phone,
-        prior
-          ? "I wasn't expecting a code — text PAY if you want to set up Apple Pay, or describe a change to your page."
-          : "That looks like a verification code, but I don't have anything pending for you. Text me a description of the page you want and I'll build it.",
-        prior?.chat_id ?? chatId,
-      );
+  switch (intent.kind) {
+    // Small talk, acknowledgements, emoji — answered, never built.
+    case "chitchat":
+      await linq.sendText(phone, intent.reply, replyTo);
       return;
-    }
-    const ok = await agentpay.verifyConnect(phone, text.trim(), prior?.id);
-    if (!ok) {
-      await linq.sendText(phone, "That code didn't work — text PAY and I'll send a fresh one.", prior?.chat_id ?? chatId);
-      return;
-    }
-    if (prior?.deploy_url && prior.status === "live") {
-      const pay = await agentpay.payInstruction({
-        handle: phone,
-        orderId: prior.id,
-        amountCents: prior.amount_cents || 900,
-        description: `LANDLINE — ${prior.slug}`,
-        chatId: prior.chat_id ?? chatId,
-      });
-      await linq.sendText(phone, `Apple Pay is set up. ${pay.text}`, prior.chat_id ?? chatId);
-    } else {
-      await linq.sendText(phone, "Apple Pay is set up — I'll send the request when your page is ready.", prior?.chat_id ?? chatId);
-    }
-    return;
-  }
 
-  // Explicit re-request of a connect code.
-  if (/^\s*pay\s*$/i.test(text) && prior) {
-    const offer = await agentpay.offerConnect(phone, prior.id);
-    const pay = offer
-      ? offer
-      : (await agentpay.payInstruction({
+    case "code": {
+      if (!agentpay.hasPendingConnect(phone)) {
+        await linq.sendText(
+          phone,
+          prior
+            ? "I wasn't expecting a code — text PAY if you want to set up Apple Pay, or describe a change to your page."
+            : "That looks like a verification code, but I don't have anything pending for you. Text me a description of the page you want and I'll build it.",
+          replyTo,
+        );
+        return;
+      }
+      const ok = await agentpay.verifyConnect(phone, intent.code, prior?.id);
+      if (!ok) {
+        await linq.sendText(phone, "That code didn't work — text PAY and I'll send a fresh one.", replyTo);
+        return;
+      }
+      if (prior?.deploy_url && prior.status === "live") {
+        const pay = await agentpay.payInstruction({
           handle: phone,
           orderId: prior.id,
           amountCents: prior.amount_cents || 900,
           description: `LANDLINE — ${prior.slug}`,
-        })).text;
-    await linq.sendText(phone, pay, prior.chat_id ?? chatId);
-    return;
-  }
-  const isRevision =
-    !!prior &&
-    ["live", "failed"].includes(prior.status) &&
-    text.split(/\s+/).length <= 25 &&
-    REVISION_HINT.test(text);
+          chatId: replyTo,
+        });
+        await linq.sendText(phone, `Apple Pay is set up. ${pay.text}`, replyTo);
+      } else {
+        await linq.sendText(phone, "Apple Pay is set up — I'll send the request when your page is ready.", replyTo);
+      }
+      return;
+    }
 
-  if (isRevision) {
-    await revise(prior!, text);
-    return;
-  }
+    case "pay": {
+      if (!prior) {
+        await linq.sendText(phone, "Nothing to pay for yet — describe the page you want and I'll build it first.", replyTo);
+        return;
+      }
+      const offer = await agentpay.offerConnect(phone, prior.id);
+      const message =
+        offer ??
+        (
+          await agentpay.payInstruction({
+            handle: phone,
+            orderId: prior.id,
+            amountCents: prior.amount_cents || 900,
+            description: `LANDLINE — ${prior.slug}`,
+          })
+        ).text;
+      await linq.sendText(phone, message, replyTo);
+      return;
+    }
 
-  const order = await intake(phone, text, chatId);
-  // PIPELINE_AUTORUN=false leaves the order at intake for an external driver — the
-  // Render Workflow, a manual retry, or the integration test.
-  if (order && process.env.PIPELINE_AUTORUN !== "false") await buildAndShip(order);
+    case "revision":
+      await revise(prior!, text);
+      return;
+
+    case "brief": {
+      const order = await intake(phone, text, chatId);
+      // PIPELINE_AUTORUN=false leaves the order at intake for an external driver —
+      // the Render Workflow, a manual retry, or the integration test.
+      if (order && process.env.PIPELINE_AUTORUN !== "false") await buildAndShip(order);
+      return;
+    }
+  }
 }
 
 // ---- hosted customer sites ----
@@ -200,6 +214,14 @@ app.get<{ Params: { slug: string } }>("/s/:slug", async (req, reply) => {
   const html = readSite(req.params.slug);
   if (!html) return reply.code(404).type("text/plain").send("Not found");
   return reply.type("text/html; charset=utf-8").header("cache-control", "no-store").send(html);
+});
+
+app.get<{ Params: { slug: string; idx: string } }>("/s/:slug/v:idx.png", async (req, reply) => {
+  const idx = Number(req.params.idx);
+  if (!Number.isInteger(idx)) return reply.code(400).send("bad variant");
+  const buf = readShot(req.params.slug, idx);
+  if (!buf) return reply.code(404).type("text/plain").send("No screenshot");
+  return reply.type("image/png").header("cache-control", "public, max-age=60").send(buf);
 });
 
 app.get<{ Params: { slug: string; idx: string } }>("/s/:slug/v:idx", async (req, reply) => {
@@ -221,7 +243,8 @@ app.get<{ Params: { orderId: string } }>("/study/:orderId", async (req, reply) =
     const html = readSite(order.slug!, `v${v.idx}.html`) ?? "";
     return html.match(/<h1[^>]*>([^<]+)<\/h1>/)?.[1] ?? "";
   });
-  return reply.type("text/html; charset=utf-8").send(studyPage(order.id, variants, headlines));
+  const shots = variants.map((v) => (shotExists(order.slug!, v.idx) ? shotUrl(order.slug!, v.idx) : null));
+  return reply.type("text/html; charset=utf-8").send(studyPage(order.id, variants, headlines, shots));
 });
 
 app.post<{ Params: { orderId: string }; Body: Record<string, string> }>(
@@ -283,6 +306,27 @@ app.post<{ Params: { step: string }; Body: { orderId?: string } }>(
     }
   },
 );
+
+/**
+ * Seed an order through the real pipeline, flagged so the dashboard can separate
+ * demo data from genuine customers. Used by `npm run seed-demo` (see DEMO.md).
+ */
+app.post<{ Body: { phone?: string; brief?: string } }>("/internal/seed", async (req, reply) => {
+  if (!internalOk(req)) return reply.code(401).send({ error: "bad internal token" });
+  const { phone, brief } = req.body ?? {};
+  if (!phone || !brief) return reply.code(400).send({ error: "phone and brief required" });
+
+  const order = await intake(phone, brief, `seed-${phone}`);
+  if (!order) {
+    // Compliance declined it — for the veto demo that's the desired outcome.
+    const declined = latestOrderForPhone(phone);
+    if (declined) updateOrder(declined.id, { is_seed: 1 });
+    return { seeded: true, declined: true, order: declined ?? null };
+  }
+  updateOrder(order.id, { is_seed: 1 });
+  await buildAndShip(getOrder(order.id)!);
+  return { seeded: true, declined: false, order: getOrder(order.id) };
+});
 
 /** Most recent order for a handle — the lookup the revision path already relies on. */
 app.get<{ Params: { phone: string } }>("/internal/orders/by-phone/:phone", async (req, reply) => {

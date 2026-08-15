@@ -12,7 +12,8 @@
     "dev": "tsx watch src/server.ts",
     "test": "tsx test/smoke.ts",
     "test:integration": "tsx test/integration.ts",
-    "test:all": "tsx test/smoke.ts && tsx test/integration.ts"
+    "test:all": "tsx test/smoke.ts && tsx test/integration.ts",
+    "seed-demo": "tsx scripts/seed-demo.ts"
   },
   "dependencies": {
     "@fastify/formbody": "^8.0.2",
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.1",
+    "playwright": "^1.62.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

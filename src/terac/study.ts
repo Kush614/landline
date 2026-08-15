@@ -152,6 +152,34 @@ export async function runStudy(input: {
     results: { note: "shipped model pick; human results pending" },
   });
 
+  const humanResult = (studyId: string | null): StudyResult | null => {
+    const t = tally(order.id, variants);
+    if (t.total < MIN_VOTES) return null;
+    const winner = variants.find((v) => v.idx === t.bestIdx)!;
+    logDecision({
+      agent: "ceo",
+      type: "human_winner",
+      orderId: order.id,
+      input: { modelPick: modelPick.idx },
+      output: { winner: winner.idx, n: t.total, preference: t.preference },
+    });
+    return {
+      studyId,
+      question: QUESTION,
+      source: "terac",
+      winner,
+      scores: t.scores,
+      preference: t.preference,
+      results: { n: t.total, scores: t.scores },
+    };
+  };
+
+  // Votes we already hold win outright, whether or not Terac launched the study —
+  // the study link is shareable, so a vote is a vote. This is also what makes a
+  // re-run of this step honour a panel that voted after we shipped.
+  const already = humanResult(null);
+  if (already) return already;
+
   if (!has.terac()) {
     alarm("no_api_key", "TERAC_API_KEY is unset — no study will be launched for this order.", order.id);
     return modelResult(null);
@@ -171,26 +199,8 @@ export async function runStudy(input: {
 
   const deadline = Date.now() + INLINE_WAIT_MS;
   while (Date.now() < deadline) {
-    const t = tally(order.id, variants);
-    if (t.total >= MIN_VOTES) {
-      const winner = variants.find((v) => v.idx === t.bestIdx)!;
-      logDecision({
-        agent: "ceo",
-        type: "human_winner",
-        orderId: order.id,
-        input: { modelPick: modelPick.idx },
-        output: { winner: winner.idx, n: t.total, preference: t.preference },
-      });
-      return {
-        studyId,
-        question: QUESTION,
-        source: "terac",
-        winner,
-        scores: t.scores,
-        preference: t.preference,
-        results: { n: t.total, scores: t.scores },
-      };
-    }
+    const result = humanResult(studyId);
+    if (result) return result;
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
 

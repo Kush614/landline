@@ -39,9 +39,18 @@ const jsonlCount = (file: string) => {
 };
 
 export async function dashboard() {
-  const shipped = (db.prepare(`SELECT COUNT(*) AS n FROM orders WHERE status = 'live'`).get() as Counts).n;
-  const orders = (db.prepare(`SELECT COUNT(*) AS n FROM orders`).get() as Counts).n;
-  const declined = (db.prepare(`SELECT COUNT(*) AS n FROM orders WHERE status = 'declined'`).get() as Counts).n;
+  // Seeded demo orders are counted separately everywhere. Nothing seeded is ever
+  // folded into a headline number — being caught inflating this would be fatal.
+  const shipped = (
+    db.prepare(`SELECT COUNT(*) AS n FROM orders WHERE status = 'live' AND is_seed = 0`).get() as Counts
+  ).n;
+  const seededShipped = (
+    db.prepare(`SELECT COUNT(*) AS n FROM orders WHERE status = 'live' AND is_seed = 1`).get() as Counts
+  ).n;
+  const orders = (db.prepare(`SELECT COUNT(*) AS n FROM orders WHERE is_seed = 0`).get() as Counts).n;
+  const declined = (
+    db.prepare(`SELECT COUNT(*) AS n FROM orders WHERE status = 'declined' AND is_seed = 0`).get() as Counts
+  ).n;
   const studies = (db.prepare(`SELECT COUNT(*) AS n FROM studies`).get() as Counts).n;
   const qaPasses = (
     db.prepare(`SELECT COUNT(*) AS n FROM variants WHERE replay_status = 'CLEAN'`).get() as Counts
@@ -58,9 +67,9 @@ export async function dashboard() {
     .get() as Counts;
 
   const booked = (
-    db.prepare(`SELECT COALESCE(SUM(amount_cents),0) AS c FROM orders WHERE status = 'live'`).get() as {
-      c: number;
-    }
+    db
+      .prepare(`SELECT COALESCE(SUM(amount_cents),0) AS c FROM orders WHERE status = 'live' AND is_seed = 0`)
+      .get() as { c: number }
   ).c;
 
   const pay = wouldPayStats();
@@ -81,6 +90,8 @@ export async function dashboard() {
     charges: revenue.count,
     booked_cents: booked,
     sites_shipped: shipped,
+    seeded_sites_shipped: seededShipped,
+    has_seed_data: seededShipped > 0,
     orders_total: orders,
     orders_declined_by_compliance: declined,
     terac_studies_run: studies,

@@ -14,6 +14,7 @@ import { writeVariant, publish, writeSpec, writeSpecs, readSpecs, variantUrl } f
 import { runStudy, watchAndUpgrade } from "../terac/study.js";
 import { runQa, markFixed } from "../replay/qa.js";
 import { buildInVm, pauseVm } from "../superserve/vm.js";
+import { captureVariants } from "../shots/capture.js";
 import { ecomPricingBlock } from "../agents/ecom.js";
 
 /**
@@ -117,7 +118,20 @@ export async function stepBuild(orderId: string) {
       terac_score: null, replay_status: null,
     });
   }
-  return { vmId: built.vmId, variants: specs.length };
+
+  // Previews for the Terac study, the iMessage reply, and the demo. Best-effort —
+  // a missing screenshot degrades the study page to a live iframe.
+  const shots = await captureVariants(
+    getOrder(orderId)!,
+    new Map(specs.map((s) => [s.idx, built.html[s.idx]])),
+  );
+
+  return {
+    vmId: built.vmId,
+    variants: specs.length,
+    shots: shots.filter((s) => s.url).length,
+    shotSource: shots.find((s) => s.url)?.source ?? "none",
+  };
 }
 
 // ------------------------------------------------------------------- human_test

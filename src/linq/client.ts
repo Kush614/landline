@@ -22,8 +22,14 @@ const greeted = new Set<string>();
  */
 const hasLink = (t: string) => /\bhttps?:\/\/|\b[\w-]+\.(?:com|sh|dev|io|app|co)\b/i.test(t);
 
+/**
+ * +1 555 01xx is the reserved-for-fiction range. Seeded demo orders use it, so we
+ * log those messages instead of firing them at a real carrier.
+ */
+export const isFictionalNumber = (phone: string) => /^\+?1?\s*\(?555\)?[\s.-]?01\d{2}/.test(phone);
+
 export async function sendText(to: string, text: string, chatId?: string): Promise<string | undefined> {
-  if (!has.linq()) {
+  if (!has.linq() || isFictionalNumber(to)) {
     logDecision({ agent: "system", type: "linq_stub_send", input: to, output: text });
     return chatId;
   }

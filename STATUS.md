@@ -1,7 +1,9 @@
 # LANDLINE — STATUS
 
-Last updated: P1 + Render Workflows + Agent Pay.
-`npm test` → **67 passed, 0 failed, 3 skipped** · `npm run test:integration` → **15 passed, 0 failed**.
+Last updated: P1 + Render Workflows + Agent Pay + screenshots + demo mode.
+`npm test` → **67 passed, 0 failed, 3 skipped** · `npm run test:integration` → **16 passed, 0 failed**.
+
+**Pitching? Read [DEMO.md](./DEMO.md), not this file.**
 
 ## Where we are
 
@@ -9,13 +11,13 @@ Last updated: P1 + Render Workflows + Agent Pay.
 |---|---|---|
 | P0 Setup | ⚠️ **blocked on human** | Repo skeleton, `.env.example`, health endpoint all done. All sponsor signups/keys outstanding — see "What I need from you". |
 | P1 Thin loop | ✅ **done** | Text → 3 variants → QA → published page → reply with URL + price. Runs end to end with zero API keys. |
-| P2 Superserve + 3 variants | 🟡 code done, unverified | 3 variants + per-order VM + pause/resume all wired. Falls back to local build. Needs `SUPERSERVE_API_KEY` to prove. |
+| P2 Superserve + 3 variants | 🟡 code done, unverified | 3 variants + per-order VM + pause/resume + **headless screenshots in the VM**. Falls back to local build + local Playwright. Needs `SUPERSERVE_API_KEY` to prove. |
 | P3 Terac | 🟡 code done, unverified | Study launch + poll + winner + 12-min fallback + background upgrade. Needs `TERAC_API_KEY` and enum verification (below). |
 | P4 Replay QA | 🟡 code done, unverified | Project create → poll → bugs → fix → re-run, max 3. Static-check fallback works today. Needs `REPLAY_API_KEY`. |
 | P5 Band | ✅ all 4 dependencies real | Kill-switch verified by test. Real-API posting needs `BAND_API_KEY` + `BAND_ROOM_ID`. |
 | P6 Linq polish | 🟡 mostly | Send, webhook + signature verify, typing, tapback, **Agent Pay (all 4 endpoints, 18 assertions vs a mock)** done. **iMessage App card still missing** — Linq publishes no schema for it. |
 | P7 Pioneer + Render Workflows | ✅ **code done** | Pipeline decomposed into 6 tasks in `src/pipeline/workflow.ts` + `render.yaml`. Pioneer copy + GLiNER2-PII wired with fallbacks. Needs a Render deploy to show run history. |
-| P8 Sell + light integrations | ⬜ not started | Dashboard JSON is live at `/api/dashboard`; Lovable page not built. |
+| P8 Sell + light integrations | 🟡 partial | Dashboard JSON live at `/api/dashboard` (documented below); **`npm run seed-demo`** fills it with real pipeline runs. Lovable page is the human's job. |
 | P9 Freeze + submit | ⬜ not started | |
 
 ## Agent Pay — the customer-facing flow
@@ -32,7 +34,8 @@ Apple Pay inside the thread, settling to our Stripe account. Connecting a handle
 ## What works right now, with no keys at all
 
 ```bash
-npm install && npm run test:all  # 67 unit + 15 integration assertions
+npm install && npm run test:all  # 67 unit + 16 integration assertions
+npm run seed-demo                # fill the dashboard with real pipeline runs
 npx tsx src/server.ts            # then POST a fake brief:
 curl -X POST localhost:3777/webhooks/linq -H 'content-type: application/json' \
   -d '{"data":{"chat_id":"c1","from":"+14155550001","parts":[{"type":"text","value":"a landing page for Fernway, a small-batch coffee roaster in Oakland"}]}}'
@@ -77,6 +80,26 @@ A wrong `task_type`/`review_type` enum would otherwise ship model-picks all day 
 - sets `terac_degraded` + `terac_alarms` on **`/api/dashboard`**.
 
 A 400/422 on `launchOpportunity` names both suspect env vars in the alarm text. `terac_studies_with_human_data` on the dashboard is the number that actually matters — if it's below `terac_studies_run`, we're shipping blind.
+
+## Screenshots
+
+Every variant gets a PNG at `/s/<slug>/v<idx>.png`, used three ways: the Terac study page (screenshots when present, live iframes when not), the fallback for the iMessage card we don't have a schema for, and the demo.
+
+Two sources, in order. **Headless Chromium inside the customer's Superserve VM** — a second, distinct Superserve use, and it means preview rendering happens in the customer's own sandbox. The PNG comes back base64-encoded because the SDK's `files.read()` returns a string. If the VM has no Chromium, or there's no VM at all, it falls back to **local Playwright**, which works today with no keys. Pages are self-contained single files with inlined CSS, so both paths render identically. Solari would be a drop-in third source.
+
+Never throws: no screenshot just means the study page uses an iframe and the reply is text-only. Set `SHOTS_ENABLED=false` to skip entirely.
+
+## The brief gate
+
+A phone number is the whole storefront, so anything a stranger types arrives at `intake`. Without a gate, a judge texting "cool" during judging spawns a site called *cool*. `src/agents/intent.ts` classifies every inbound message into `brief | revision | pay | code | chitchat`:
+
+- bare 6-digit numbers → Agent Pay codes, never briefs
+- `PAY` → payment flow
+- greetings, thanks, yes/no, `?`, bare emoji → answered with a useful reply, never built
+- under 4 words with no actionable verb → asked for more detail
+- short *and* actionable (`make it darker`) from a customer with a live page → revision
+
+Verified live: `cool`, `thanks!`, `👍`, `ok`, `hi` produce five helpful replies and zero orders.
 
 ## Deliberate deviations from the spec
 
@@ -158,7 +181,7 @@ Also: `RegisterTaskOptions` is `{name, timeoutSeconds, plan, retry:{maxRetries, 
 - **The iMessage App card has no published schema.** If Linq doesn't supply one, fall back to a rich-media message: preview screenshot + status line + pay link. Still demoable, and the screenshot needs Solari or a headless shot from the Superserve VM.
 - **Linq sandbox forbids links in the first outbound message.** Handled: `linq/client.ts` sends a link-free ack first and puts the URL in the next message.
 - **Render docs are wrong about the SDK import.** Their tutorial shows `import { task } from '@renderinc/sdk'` and a `@render/sdk` package. Neither exists: the package is `@renderinc/sdk` and `task`/`startTaskServer` are exported from **`@renderinc/sdk/workflows`**. Verified against the installed typings, not the docs.
-- **No screenshots yet** — the study page uses live iframes instead. Fine, arguably better, but Solari/headless screenshots would look better in the Terac task preview.
+- **Solari not wired.** Screenshots come from headless Chromium in the Superserve VM, falling back to local Playwright. Solari would be a drop-in third source if there's time.
 - `logs/replay-false-positives.md` is empty — file any as they show up ($50 each).
 
 ## Repo map
