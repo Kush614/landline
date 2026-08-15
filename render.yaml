@@ -5,7 +5,9 @@ services:
     name: landline-api
     runtime: node
     plan: starter
-    buildCommand: npm ci && npm run build
+    # Chromium powers hero screenshots. Non-fatal: a failed install just means the
+    # study page falls back to live iframes, so it must never block a deploy.
+    buildCommand: npm ci && npm run build && (npx playwright install --with-deps chromium || npx playwright install chromium || true)
     startCommand: npm start
     healthCheckPath: /health
     envVars:
