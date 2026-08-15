@@ -107,6 +107,14 @@ try {
       TERAC_INLINE_WAIT_MS: "300",
       TERAC_MIN_VOTES: "1",
       LOG_LEVEL: "warn",
+      // Same rule as the unit suite: the integration server must not be able to
+      // spend money or text anyone. Blank every paid credential it inherits.
+      TERAC_API_KEY: "",
+      REPLAY_API_KEY: "",
+      SUPERSERVE_API_KEY: "",
+      PIONEER_API_KEY: "",
+      LINQ_API_KEY: "",
+      LINQ_WEBHOOK_SECRET: "",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

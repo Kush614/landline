@@ -17,6 +17,15 @@ process.env.BASE_URL = "http://localhost:3999";
 process.env.TERAC_INLINE_WAIT_MS = "200";
 process.env.TERAC_MIN_VOTES = "1";
 process.env.BAND_ENABLED = "true";
+// Tests must never touch a paid API. A real TERAC_API_KEY in .env previously made
+// `npm test` create and LAUNCH a real Terac study (billed per participant). Blank
+// the key and point the base URL at a dead port so nothing can escape the suite.
+process.env.TERAC_API_KEY = "";
+process.env.TERAC_BASE_URL = "http://127.0.0.1:1";
+process.env.REPLAY_API_KEY = "";
+process.env.SUPERSERVE_API_KEY = "";
+process.env.PIONEER_API_KEY = "";
+process.env.LINQ_API_KEY = "";
 
 let passed = 0;
 let failed = 0;
@@ -134,7 +143,7 @@ section("3. Study winner selection and fallback");
   const realKey = cfg.terac.apiKey;
   const realUrl = cfg.terac.baseUrl;
   cfg.terac.apiKey = "test-key";
-  cfg.terac.baseUrl = "http://127.0.0.1:1";
+  cfg.terac.baseUrl = "http://127.0.0.1:1"; // dead port: never reaches Terac
   const withVotes = await runStudy({ order, variants, modelPick: variants[0] });
   cfg.terac.apiKey = realKey;
   cfg.terac.baseUrl = realUrl;
