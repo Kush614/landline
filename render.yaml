@@ -13,6 +13,10 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
+      # Playwright defaults to ~/.cache, which does not survive Render's
+      # build -> runtime boundary. 0 puts browsers in node_modules instead.
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"
       # SQLite and generated sites need to survive restarts.
       - key: DATA_DIR
         value: /var/data/db

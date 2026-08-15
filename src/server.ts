@@ -345,6 +345,20 @@ app.get<{ Params: { id: string } }>("/internal/orders/:id", async (req, reply) =
   return { order, variants: variantsFor(order.id), payments: agentpay.paymentsForOrder(order.id) };
 });
 
+/** Apply a revision without forging a signed inbound message. */
+app.post<{ Params: { id: string }; Body: { instruction?: string } }>(
+  "/internal/orders/:id/revise",
+  async (req, reply) => {
+    if (!internalOk(req)) return reply.code(401).send({ error: "bad internal token" });
+    const order = getOrder(req.params.id);
+    if (!order) return reply.code(404).send({ error: "not found" });
+    const instruction = req.body?.instruction;
+    if (!instruction) return reply.code(400).send({ error: "instruction required" });
+    await revise(order, instruction);
+    return { order: getOrder(order.id) };
+  },
+);
+
 /** Run the remaining pipeline in-process — the manual-retry path for a stuck order. */
 app.post<{ Params: { id: string } }>("/internal/orders/:id/run", async (req, reply) => {
   if (!internalOk(req)) return reply.code(401).send({ error: "bad internal token" });

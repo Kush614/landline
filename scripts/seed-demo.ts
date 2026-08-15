@@ -145,11 +145,14 @@ async function main() {
       }
 
       if (seed.revision) {
-        await post("/webhooks/linq", {
-          data: { chat_id: `seed-${seed.phone}`, from: seed.phone, parts: [{ type: "text", value: seed.revision }] },
-        });
-        await sleep(2500);
-        console.log(`    → revision applied: "${seed.revision}"`);
+        // Not via /webhooks/linq — that endpoint verifies Linq's signature now, so
+        // faking an inbound message would (correctly) 401. Seeding is internal.
+        try {
+          await post(`/internal/orders/${order.id}/revise`, { instruction: seed.revision });
+          console.log(`    → revision applied: "${seed.revision}"`);
+        } catch (err) {
+          console.log(`    → revision skipped: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
 
       results.push({ note: seed.note, status: "live", url: order.deploy_url });
