@@ -19,6 +19,7 @@ import { studyPage, thanksPage } from "./terac/page.js";
 import { dashboard, stripeMode } from "./dashboard/data.js";
 import { classifyAndLog } from "./agents/intent.js";
 import { shotExists, shotUrl } from "./shots/capture.js";
+import { indexPage } from "./pages/index.js";
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL ?? "info" },
@@ -209,6 +210,15 @@ async function handleInbound(msg: linq.InboundMessage) {
     }
   }
 }
+
+/**
+ * The storefront, and the entrypoint crawlers land on. Without a page here, Replay
+ * QA blocks the entire project on "target URL returned HTTP 404".
+ */
+app.get("/", async (_req, reply) => {
+  const d = await dashboard();
+  return reply.type("text/html; charset=utf-8").header("cache-control", "no-store").send(indexPage(d));
+});
 
 // ---- hosted customer sites ----
 app.get<{ Params: { slug: string } }>("/s/:slug", async (req, reply) => {
