@@ -11,6 +11,7 @@ import {
 } from "./db.js";
 import * as linq from "./linq/client.js";
 import { intake, buildAndShip, revise } from "./pipeline/run.js";
+import { STEPS, STEP_FNS, type StepName } from "./pipeline/steps.js";
 import { readSite } from "./deploy/sites.js";
 import { studyPage, thanksPage } from "./terac/page.js";
 import { dashboard } from "./dashboard/data.js";
@@ -32,20 +33,57 @@ app.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, 
   }
 });
 
-app.get("/health", async () => ({
-  ok: true,
-  ts: new Date().toISOString(),
-  sponsors: {
-    linq: has.linq(),
-    stripe: has.stripe(),
-    terac: has.terac(),
-    replay: has.replay(),
-    superserve: has.superserve(),
-    pioneer: has.pioneer(),
-    band: has.band(),
-    render: has.render(),
-  },
-}));
+/**
+ * Screenshot-friendly: every sponsor, whether it's running live or on its fallback,
+ * and what the fallback actually does.
+ */
+const SPONSOR_FALLBACKS: Record<string, string> = {
+  linq: "messages logged to decisions.jsonl instead of sent",
+  stripe: "no payment link in the reply",
+  terac: "ship the model's pick, no human vote",
+  replay: "static markup checks only",
+  superserve: "build locally, no per-order VM",
+  pioneer: "deterministic template copy, regex PII scrub",
+  band: "PIPELINE HALTS — this is the kill-switch",
+  render: "pipeline runs in-process, no Workflow run history",
+};
+
+function sponsorReport() {
+  const live: Record<string, boolean> = {
+    linq: has.linq(), stripe: has.stripe(), terac: has.terac(), replay: has.replay(),
+    superserve: has.superserve(), pioneer: has.pioneer(), band: has.band(), render: has.render(),
+  };
+  const rows = Object.entries(live).map(([name, isLive]) => ({
+    sponsor: name,
+    mode: isLive ? "LIVE" : "FALLBACK",
+    fallback: isLive ? null : SPONSOR_FALLBACKS[name],
+  }));
+  return {
+    live,
+    rows,
+    live_count: rows.filter((r) => r.mode === "LIVE").length,
+    total: rows.length,
+    summary: rows.map((r) => `${r.sponsor}=${r.mode}`).join(" "),
+  };
+}
+
+app.get("/health", async () => {
+  const s = sponsorReport();
+  const { teracAlarms } = await import("./terac/study.js");
+  return {
+    ok: true,
+    ts: new Date().toISOString(),
+    terac_degraded: teracAlarms.length > 0,
+    terac_last_alarm: teracAlarms.at(-1) ?? null,
+    base_url: config.baseUrl,
+    band_enabled: config.band.enabled,
+    orchestration: process.env.RENDER_WORKFLOW_ENABLED === "true" ? "render-workflow" : "in-process",
+    sponsors: s.live,
+    sponsor_status: s.rows,
+    sponsors_live: `${s.live_count}/${s.total}`,
+    summary: s.summary,
+  };
+});
 
 const REVISION_HINT = /\b(make|change|add|remove|swap|darker|lighter|bigger|smaller|update|instead|move|rename|headline|button|cta|color|colour)\b/i;
 
@@ -159,6 +197,35 @@ app.post<{ Params: { orderId: string }; Body: Record<string, string> }>(
       output: { pick: idx, total: votesFor(order.id).length },
     });
     return reply.type("text/html; charset=utf-8").send(thanksPage());
+  },
+);
+
+/**
+ * Step endpoints the Render Workflow calls. Each maps to one §4 pipeline step and is
+ * re-runnable, so Render's retries are safe. Guarded by a shared token — the workflow
+ * runs outside this service's private network.
+ */
+app.post<{ Params: { step: string }; Body: { orderId?: string } }>(
+  "/internal/steps/:step",
+  async (req, reply) => {
+    const expected = process.env.INTERNAL_TOKEN;
+    if (expected && req.headers["x-internal-token"] !== expected) {
+      return reply.code(401).send({ error: "bad internal token" });
+    }
+    const step = req.params.step as StepName;
+    if (!STEPS.includes(step)) return reply.code(404).send({ error: `unknown step ${step}` });
+
+    const orderId = req.body?.orderId;
+    if (!orderId) return reply.code(400).send({ error: "orderId required" });
+
+    try {
+      const out = await STEP_FNS[step](orderId);
+      logDecision({ agent: "ceo", type: `step:${step}`, orderId, output: out });
+      return { step, orderId, result: out };
+    } catch (err) {
+      logDecision({ agent: "ceo", type: `step_failed:${step}`, orderId, output: String(err) });
+      return reply.code(500).send({ step, orderId, error: String(err) });
+    }
   },
 );
 

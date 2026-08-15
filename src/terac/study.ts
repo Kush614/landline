@@ -25,20 +25,43 @@ const INLINE_WAIT_MS = Number(process.env.TERAC_INLINE_WAIT_MS ?? 120_000);
 const BACKGROUND_WAIT_MS = Number(process.env.TERAC_BACKGROUND_WAIT_MS ?? 12 * 60_000);
 const POLL_MS = 8_000;
 
-async function ensureProject(): Promise<string | null> {
-  if (config.terac.projectId) return config.terac.projectId;
-  return softly(
-    "terac.createProject",
-    async () => {
-      const res = await req<{ id: string }>(`${config.terac.baseUrl}/projects`, {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({ name: "LANDLINE landing-page preference tests" }),
-      });
-      return res.id ?? null;
-    },
-    null,
+/**
+ * Terac degradations are the one class of failure we must never swallow: a bad
+ * task_type enum would silently ship model-picks all day and leave us with no human
+ * evidence for the host's own track. Every one of these is a loud, greppable alarm.
+ */
+export const teracAlarms: { at: string; stage: string; detail: string }[] = [];
+
+function alarm(stage: string, detail: string, orderId?: string) {
+  const at = new Date().toISOString();
+  teracAlarms.push({ at, stage, detail });
+  console.error(
+    `\n${"!".repeat(72)}\n` +
+      `TERAC DEGRADED — ${stage}\n${detail}\n` +
+      `Consequence: this order ships the MODEL's pick, with no human preference data.\n` +
+      `Fix: verify TERAC_TASK_TYPE / TERAC_REVIEW_TYPE and TERAC_API_KEY at the Terac booth.\n` +
+      `${"!".repeat(72)}\n`,
   );
+  logDecision({ agent: "ceo", type: "TERAC_DEGRADED", orderId, input: stage, output: detail });
+}
+
+async function ensureProject(orderId?: string): Promise<string | null> {
+  if (config.terac.projectId) return config.terac.projectId;
+  try {
+    const res = await req<{ id: string }>(`${config.terac.baseUrl}/projects`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ name: "LANDLINE landing-page preference tests" }),
+    });
+    if (!res?.id) {
+      alarm("createProject", "Terac returned no project id", orderId);
+      return null;
+    }
+    return res.id;
+  } catch (err) {
+    alarm("createProject", `POST /projects failed: ${err instanceof Error ? err.message : String(err)}`, orderId);
+    return null;
+  }
 }
 
 /**
@@ -47,9 +70,7 @@ async function ensureProject(): Promise<string | null> {
  * results regardless of Terac's own question schema.
  */
 async function launchOpportunity(order: Order, projectId: string): Promise<string | null> {
-  return softly(
-    "terac.launchOpportunity",
-    async () => {
+  try {
       const created = await req<{ id: string }>(`${config.terac.baseUrl}/opportunities`, {
         method: "POST",
         headers: headers(),
@@ -77,17 +98,26 @@ async function launchOpportunity(order: Order, projectId: string): Promise<strin
           ],
         }),
       });
-      if (!created?.id) return null;
+    if (!created?.id) {
+      alarm("createOpportunity", "Terac accepted the request but returned no opportunity id", order.id);
+      return null;
+    }
 
-      await req(`${config.terac.baseUrl}/opportunities/${created.id}/launch`, {
-        method: "POST",
-        headers: headers(),
-        body: "{}",
-      });
-      return created.id;
-    },
-    null,
-  );
+    await req(`${config.terac.baseUrl}/opportunities/${created.id}/launch`, {
+      method: "POST",
+      headers: headers(),
+      body: "{}",
+    });
+    return created.id;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // A 4xx here almost certainly means our task_type/review_type guess is wrong.
+    const enumHint = /400|422/.test(msg)
+      ? ` — likely a bad TERAC_TASK_TYPE ("${process.env.TERAC_TASK_TYPE ?? "unmoderated_task"}") or TERAC_REVIEW_TYPE ("${process.env.TERAC_REVIEW_TYPE ?? "auto"}"). ASK AT THE TERAC BOOTH.`
+      : "";
+    alarm("launchOpportunity", `${msg}${enumHint}`, order.id);
+    return null;
+  }
 }
 
 function tally(orderId: string, variants: Variant[]) {
@@ -123,12 +153,14 @@ export async function runStudy(input: {
   });
 
   if (!has.terac()) {
-    logDecision({ agent: "ceo", type: "study_skipped", orderId: order.id, output: "no TERAC_API_KEY" });
+    alarm("no_api_key", "TERAC_API_KEY is unset — no study will be launched for this order.", order.id);
     return modelResult(null);
   }
 
-  const projectId = await ensureProject();
+  const projectId = await ensureProject(order.id);
   const studyId = projectId ? await launchOpportunity(order, projectId) : null;
+  // Even if the launch failed we keep polling: the study link is shareable, and votes
+  // from anyone (including the room) are still real human preference data.
   logDecision({
     agent: "ceo",
     type: "study_launched",
@@ -163,12 +195,11 @@ export async function runStudy(input: {
   }
 
   // §4.4 fallback: ship the model's pick now, keep listening, upgrade later.
-  logDecision({
-    agent: "ceo",
-    type: "study_fallback",
-    orderId: order.id,
-    output: `no human results in ${INLINE_WAIT_MS}ms — shipping model pick, still polling`,
-  });
+  alarm(
+    "no_results_in_time",
+    `Study ${studyId} launched but fewer than ${MIN_VOTES} responses arrived in ${Math.round(INLINE_WAIT_MS / 1000)}s. Still polling in the background for ${Math.round(BACKGROUND_WAIT_MS / 60_000)} min.`,
+    order.id,
+  );
   return modelResult(studyId);
 }
 

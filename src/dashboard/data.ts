@@ -65,6 +65,14 @@ export async function dashboard() {
 
   const pay = wouldPayStats();
   const revenue = await stripeRevenue();
+  const { teracAlarms } = await import("../terac/study.js");
+
+  // A study row with no human votes behind it is a model-pick we shipped blind.
+  const studiesWithHumans = (
+    db
+      .prepare(`SELECT COUNT(DISTINCT order_id) AS n FROM votes`)
+      .get() as Counts
+  ).n;
 
   return {
     updated_at: new Date().toISOString(),
@@ -76,9 +84,13 @@ export async function dashboard() {
     orders_total: orders,
     orders_declined_by_compliance: declined,
     terac_studies_run: studies,
+    terac_studies_with_human_data: studiesWithHumans,
     human_votes: votes,
     humans_overrode_model: overrides.n,
     human_override_rate: studies ? overrides.n / studies : 0,
+    // Loud on purpose — a silent Terac degradation would cost us the host's track.
+    terac_degraded: teracAlarms.length > 0,
+    terac_alarms: teracAlarms.slice(-5),
     qa_passes: qaPasses,
     agent_decisions: jsonlCount("decisions.jsonl"),
     pricing_study: {

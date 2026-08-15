@@ -1,0 +1,81 @@
+services:
+  # The storefront: Linq webhook, hosted customer sites, Terac study page,
+  # dashboard feed, and the /internal/steps endpoints the workflow drives.
+  - type: web
+    name: landline-api
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # SQLite and generated sites need to survive restarts.
+      - key: DATA_DIR
+        value: /var/data/db
+      - key: SITES_DIR
+        value: /var/data/sites
+      - key: RENDER_WORKFLOW_ENABLED
+        value: "true"
+      - key: INTERNAL_TOKEN
+        generateValue: true
+      - key: BAND_ENABLED
+        value: "true"
+      - key: BASE_URL
+        sync: false
+      - key: LINQ_API_KEY
+        sync: false
+      - key: LINQ_PHONE_NUMBER
+        sync: false
+      - key: LINQ_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PAYMENT_LINK
+        sync: false
+      - key: STRIPE_READ_KEY
+        sync: false
+      - key: TERAC_API_KEY
+        sync: false
+      - key: TERAC_TASK_TYPE
+        sync: false
+      - key: TERAC_REVIEW_TYPE
+        sync: false
+      - key: REPLAY_API_KEY
+        sync: false
+      - key: SUPERSERVE_API_KEY
+        sync: false
+      - key: PIONEER_API_KEY
+        sync: false
+      - key: BAND_API_KEY
+        sync: false
+      - key: BAND_AGENT_ID
+        sync: false
+      - key: BAND_ROOM_ID
+        sync: false
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_OWNER_ID
+        sync: false
+    disk:
+      name: landline-data
+      mountPath: /var/data
+      sizeGB: 1
+
+  # The §4 pipeline. Render owns orchestration: retries, per-step timeouts, and the
+  # run history judges can see in the dashboard.
+  - type: workflow
+    name: landline-pipeline
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/workflow-entry.js
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: LANDLINE_API_URL
+        sync: false
+      - key: INTERNAL_TOKEN
+        fromService:
+          type: web
+          name: landline-api
+          envVarKey: INTERNAL_TOKEN

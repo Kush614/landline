@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS orders (
   band_thread_id TEXT,
   compliance TEXT DEFAULT 'pending',
   compliance_reason TEXT,
+  winner_idx INTEGER,
+  qa_status TEXT,
   stripe_paid INTEGER DEFAULT 0,
   amount_cents INTEGER DEFAULT 0,
   created_at TEXT NOT NULL,
@@ -93,6 +95,8 @@ export interface Order {
   band_thread_id: string | null;
   compliance: string;
   compliance_reason: string | null;
+  winner_idx: number | null;
+  qa_status: string | null;
   stripe_paid: number;
   amount_cents: number;
   created_at: string;
@@ -152,6 +156,22 @@ export function upsertVariant(v: Variant) {
 
 export const variantsFor = (orderId: string) =>
   db.prepare(`SELECT * FROM variants WHERE order_id = ? ORDER BY idx`).all(orderId) as Variant[];
+
+export interface StudyRow {
+  id: string;
+  order_id: string;
+  terac_study_id: string | null;
+  question: string;
+  results_json: string | null;
+  winner_variant_id: string | null;
+  model_pick_variant_id: string | null;
+  created_at: string;
+}
+
+export const latestStudy = (orderId: string) =>
+  db
+    .prepare(`SELECT * FROM studies WHERE order_id = ? ORDER BY created_at DESC LIMIT 1`)
+    .get(orderId) as StudyRow | undefined;
 
 export function recordEvent(orderId: string | null, agent: string, type: string, payload: unknown) {
   db.prepare(

@@ -37,6 +37,25 @@ export function publish(slug: string, html: string): string {
   return url;
 }
 
+/**
+ * All three specs, persisted so a later pipeline step running in a different Render
+ * task instance can pick up where the previous one left off.
+ */
+export function writeSpecs(slug: string, specs: unknown[]) {
+  mkdirSync(dir(slug), { recursive: true });
+  writeFileSync(resolve(dir(slug), "specs.json"), JSON.stringify(specs), "utf8");
+}
+
+export function readSpecs<T>(slug: string): T[] | null {
+  const path = resolve(dir(slug), "specs.json");
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as T[];
+  } catch {
+    return null;
+  }
+}
+
 /** The winning spec is the source of truth for revisions — we re-render, never string-munge. */
 export function writeSpec(slug: string, spec: unknown) {
   mkdirSync(dir(slug), { recursive: true });
