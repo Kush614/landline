@@ -63,7 +63,19 @@ section("1. Inbound webhook creates an order and opens a Band thread");
     data: { chat_id: "c1", from: "+14155550001", parts: [{ type: "text", value: BRIEF }] },
   });
   check("webhook payload parses", parsed?.phone === "+14155550001" && parsed?.text === BRIEF);
-  check("unsigned request passes when no secret is set", verifySignature({}, "{}"));
+  // Hermetic: assert both branches explicitly rather than inheriting whatever
+  // LINQ_WEBHOOK_SECRET happens to be in the developer's .env.
+  {
+    const cfg = (await import("../src/config.js")).config;
+    const real = cfg.linq.webhookSecret;
+    cfg.linq.webhookSecret = "";
+    check("unsigned request passes when no secret is set", verifySignature({}, "{}"));
+    cfg.linq.webhookSecret = "whsec_dGVzdHNlY3JldA==";
+    check("unsigned request is rejected once a secret is set", !verifySignature({}, "{}"));
+    check("stale timestamp is rejected", !verifySignature(
+      { "webhook-id": "x", "webhook-timestamp": "1", "webhook-signature": "v1,bogus" }, "{}"));
+    cfg.linq.webhookSecret = real;
+  }
 
   const order = await intake("+14155550001", BRIEF, "c1");
   check("order row created", !!order);
