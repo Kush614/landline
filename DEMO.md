@@ -178,7 +178,11 @@ Turn it back on before continuing.
 > Open the study page, then `terac_studies_with_human_data` on the dashboard. *"That's the count of studies with actual votes behind them. If it were below the study count, we'd be shipping blind, and we'd tell you."*
 
 **"Is this revenue real?"**
-> "`revenue_cents` comes from Stripe's API with a read-only key. Seeded demo orders are flagged in the database and excluded from every number on this page."
+> "`revenue_cents` comes from Stripe's API with a read-only key, and the dashboard reports `revenue_mode` next to it — `live` or `test`. Seeded demo orders are flagged in the database and excluded from every number on this page."
+
+**If `revenue_mode` is `test`, say so before anyone asks:**
+> "Our live Stripe account went into a 2–3 day identity review this afternoon, so payments are running in test mode. The flow is identical and the charge is real in Stripe's sandbox — but that number is not money, and we're not claiming it is."
+
 
 **"What stops it building something awful?"**
 > The Compliance agent. Text it `a supplement that cures anxiety` live and let it decline.

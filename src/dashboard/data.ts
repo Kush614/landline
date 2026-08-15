@@ -10,6 +10,17 @@ interface Counts {
 
 let stripeCache: { at: number; cents: number; count: number } | null = null;
 
+/**
+ * Test-mode money must never be presentable as revenue. The key prefix is the
+ * ground truth — `rk_test_`/`sk_test_` can only ever see test charges — so we derive
+ * the mode from it rather than trusting a config flag someone could set wrong.
+ */
+export function stripeMode(): "live" | "test" | "unconfigured" {
+  const k = config.stripe.readKey;
+  if (!k) return "unconfigured";
+  return /_test_/.test(k) ? "test" : "live";
+}
+
 /** Read-only Stripe balance/charges via the restricted key we submitted (§5.2). */
 async function stripeRevenue(): Promise<{ cents: number; count: number }> {
   if (!config.stripe.readKey) return { cents: 0, count: 0 };
@@ -87,6 +98,9 @@ export async function dashboard() {
     updated_at: new Date().toISOString(),
     revenue_cents: revenue.cents,
     revenue_source: config.stripe.readKey ? "stripe" : "unconfigured",
+    // "test" means these dollars are not real. Surface it, never bury it.
+    revenue_mode: stripeMode(),
+    revenue_is_real: stripeMode() === "live",
     charges: revenue.count,
     booked_cents: booked,
     sites_shipped: shipped,

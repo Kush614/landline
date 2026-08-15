@@ -16,7 +16,7 @@ import { intake, buildAndShip, revise } from "./pipeline/run.js";
 import { STEPS, STEP_FNS, type StepName } from "./pipeline/steps.js";
 import { readSite, readShot } from "./deploy/sites.js";
 import { studyPage, thanksPage } from "./terac/page.js";
-import { dashboard } from "./dashboard/data.js";
+import { dashboard, stripeMode } from "./dashboard/data.js";
 import { classifyAndLog } from "./agents/intent.js";
 import { shotExists, shotUrl } from "./shots/capture.js";
 
@@ -79,6 +79,7 @@ app.get("/health", async () => {
     ts: new Date().toISOString(),
     terac_degraded: teracAlarms.length > 0,
     terac_last_alarm: teracAlarms.at(-1) ?? null,
+    stripe_mode: stripeMode(),
     base_url: config.baseUrl,
     band_enabled: config.band.enabled,
     orchestration: process.env.RENDER_WORKFLOW_ENABLED === "true" ? "render-workflow" : "in-process",
