@@ -1,6 +1,7 @@
 import { config, has } from "../config.js";
 import { req, softly } from "../http.js";
 import { logDecision, type Agent } from "../log.js";
+import { speakerFor, resolveMentions, registry } from "./registry.js";
 
 export interface BandMessage {
   id: string;
@@ -63,18 +64,29 @@ export async function post(opts: {
   };
 
   if (has.band() && config.band.roomId) {
-    const mentionStr = msg.mentions.map((m) => `@${m}`).join(" ");
-    await softly(
-      "band.post",
-      () =>
-        req(`${config.band.baseUrl}/chats/${config.band.roomId}/messages`, {
-          method: "POST",
-          headers: { "content-type": "application/json", "X-API-Key": config.band.apiKey },
-          body: JSON.stringify({ content: `${mentionStr} [${opts.thread}] ${opts.from}/${opts.type}: ${opts.body}` }),
-        }),
-      undefined,
-      opts.orderId,
-    );
+    const speaker = speakerFor(opts.from);
+    const mentions = resolveMentions(opts.from, opts.mentions ?? []);
+    if (speaker && mentions.length) {
+      // When the role has no Band identity of its own, the CEO speaks for it and we
+      // say so, rather than passing the message off as the CEO's own.
+      const attribution = speaker.asSelf ? "" : `[${opts.from}] `;
+      await softly(
+        "band.post",
+        () =>
+          req(`${config.band.baseUrl}/chats/${config.band.roomId}/messages`, {
+            method: "POST",
+            headers: { "content-type": "application/json", "X-API-Key": speaker.key },
+            body: JSON.stringify({
+              message: {
+                content: `${attribution}${opts.type}: ${opts.body}`,
+                mentions,
+              },
+            }),
+          }),
+        undefined,
+        opts.orderId,
+      );
+    }
   }
 
   deliver(msg);
@@ -114,14 +126,16 @@ export const latest = (thread: string, type: string) =>
 
 /** Adds a specialist to the room mid-run (§3.3.3). */
 export async function addParticipant(agent: Agent, thread: string, orderId?: string) {
-  if (has.band() && config.band.roomId) {
+  const joining = registry()[agent];
+  const ceo = registry()["ceo"];
+  if (has.band() && config.band.roomId && joining && ceo) {
     await softly(
       "band.addParticipant",
       () =>
         req(`${config.band.baseUrl}/chats/${config.band.roomId}/participants`, {
           method: "POST",
-          headers: { "content-type": "application/json", "X-API-Key": config.band.apiKey },
-          body: JSON.stringify({ agent_name: agent }),
+          headers: { "content-type": "application/json", "X-API-Key": ceo.key },
+          body: JSON.stringify({ participant: { handle: joining.handle } }),
         }),
       undefined,
       orderId,
