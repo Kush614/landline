@@ -72,6 +72,19 @@ function sponsorReport() {
   };
 }
 
+/**
+ * Honest orchestration reporting. The env flag is an intent, not a fact — if the
+ * Workflow service does not exist, every trigger fails and the pipeline runs
+ * in-process. Say which one actually happened.
+ */
+async function orchestrationState(): Promise<string> {
+  if (process.env.RENDER_WORKFLOW_ENABLED !== "true") return "in-process";
+  const { lastWorkflowTrigger } = await import("./pipeline/trigger.js");
+  const t = lastWorkflowTrigger();
+  if (!t) return "render-workflow (enabled, no order dispatched yet)";
+  return t.ok ? "render-workflow" : `in-process (workflow trigger failing: ${t.detail.slice(0, 80)})`;
+}
+
 app.get("/health", async () => {
   const s = sponsorReport();
   const { teracAlarms } = await import("./terac/study.js");
@@ -86,7 +99,7 @@ app.get("/health", async () => {
     stripe_mode: stripeMode(),
     base_url: config.baseUrl,
     band_enabled: config.band.enabled,
-    orchestration: process.env.RENDER_WORKFLOW_ENABLED === "true" ? "render-workflow" : "in-process",
+    orchestration: await orchestrationState(),
     sponsors: s.live,
     sponsor_status: s.rows,
     sponsors_live: `${s.live_count}/${s.total}`,
