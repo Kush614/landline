@@ -40,7 +40,7 @@ function clip(s: string, max: number): string {
   // seismic" reads as a truncation, where "…engineering studio" reads as finished.
   // Prepositions like "in" are deliberately absent — "roaster in Oakland" is fine.
   const clause = s.search(
-    /,| that | which | who | and | where | so that | taking | offering | serving | providing | specialou?s|specialis|specializ| helping | working /i,
+    /,| that | which | who | and | where | so that | taking | offering | serving | providing | selling | making | building | creating | licensing | renting | running | designing | specialis| specializ| helping | working /i,
   );
   let out = clause > 12 ? s.slice(0, clause) : s;
   if (out.length > max) {
