@@ -4,7 +4,7 @@ services:
   - type: web
     name: landline-api
     runtime: node
-    plan: starter
+    plan: free
     # Chromium powers hero screenshots. Non-fatal: a failed install just means the
     # study page falls back to live iframes, so it must never block a deploy.
     buildCommand: npm ci && npm run build && (npx playwright install --with-deps chromium || npx playwright install chromium || true)
@@ -17,11 +17,9 @@ services:
       # build -> runtime boundary. 0 puts browsers in node_modules instead.
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: "0"
-      # SQLite and generated sites need to survive restarts.
-      - key: DATA_DIR
-        value: /var/data/db
-      - key: SITES_DIR
-        value: /var/data/sites
+      # NOTE: free tier has no persistent disk, so SQLite and generated sites are
+      # ephemeral and every deploy wipes them. Re-run `npm run seed-demo` after a
+      # deploy. Move to a paid plan and restore the disk block below to fix this.
       - key: RENDER_WORKFLOW_ENABLED
         value: "true"
       - key: INTERNAL_TOKEN
@@ -62,17 +60,17 @@ services:
         sync: false
       - key: RENDER_OWNER_ID
         sync: false
-    disk:
-      name: landline-data
-      mountPath: /var/data
-      sizeGB: 1
+    # disk:                      # requires a paid plan
+    #   name: landline-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
 
   # The §4 pipeline. Render owns orchestration: retries, per-step timeouts, and the
   # run history judges can see in the dashboard.
   - type: workflow
     name: landline-pipeline
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm ci && npm run build
     startCommand: node dist/workflow-entry.js
     envVars:
