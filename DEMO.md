@@ -25,15 +25,15 @@ npm run seed-demo          # only if the dashboard is empty — see "Seeding" be
 
 **Tabs to have open, left to right, in this order:**
 
-1. iMessage conversation with the LANDLINE number (full screen, big text)
-0. `$BASE_URL/` — the storefront, good to open on
-2. Band room `landline-hq`
-3. `$BASE_URL/study/<a seeded order id>` — the Terac panelist page
-4. Replay QA dashboard (the project for the most recent order)
-5. Render dashboard → **landline-pipeline** → run history
-6. The Lovable revenue dashboard
-7. Stripe dashboard → Payments
-8. `$BASE_URL/health` — the sponsor LIVE/FALLBACK list
+1. `$BASE_URL/` — the storefront. Good page to be sitting on when you start.
+2. iMessage conversation with the LANDLINE number (full screen, big text)
+3. Band room `landline-hq`
+4. `$BASE_URL/study/<a seeded order id>` — the panelist page
+5. Replay QA dashboard — project `landline`
+6. Render dashboard → **landline-api** → deploys/logs
+7. The Lovable revenue dashboard
+8. Stripe dashboard → Payments
+9. `$BASE_URL/health` — the sponsor LIVE/FALLBACK list
 
 Have `tail -f logs/decisions.jsonl` running in a terminal you can flip to.
 
