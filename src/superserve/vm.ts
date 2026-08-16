@@ -8,13 +8,29 @@ interface SandboxLike {
   id: string;
   files: {
     write(path: string, content: string): Promise<unknown>;
-    read(path: string): Promise<string>;
+    /** Returns bytes (Uint8Array), not a string — see decode() below. */
+    read(path: string): Promise<unknown>;
     list?(path: string): Promise<unknown>;
   };
   commands: { run(cmd: string): Promise<{ output?: string; stdout?: string; exitCode: number }> };
   pause(): Promise<unknown>;
   getPreviewUrl?(port: number): string;
   publishPreviewPort?(port: number, opts?: { access?: string }): Promise<unknown>;
+}
+
+/**
+ * `files.read` resolves to a Uint8Array, not a string — reading a file and using it
+ * directly yields "[object Object]". Decode explicitly.
+ */
+function decode(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (v instanceof Uint8Array) return Buffer.from(v).toString("utf8");
+  if (v && typeof v === "object") {
+    // The SDK can hand back a plain object of byte indices over JSON transports.
+    const bytes = Object.values(v as Record<string, number>).filter((n) => typeof n === "number");
+    if (bytes.length) return Buffer.from(bytes).toString("utf8");
+  }
+  return String(v ?? "");
 }
 
 async function sdk(): Promise<any | null> {
@@ -102,7 +118,7 @@ export async function readSiteFromVm(order: Order): Promise<{ vm: SandboxLike | 
   const vm = await getVm(order);
   if (!vm) return { vm: null, html: null };
   try {
-    return { vm, html: await vm.files.read("/site/index.html") };
+    return { vm, html: decode(await vm.files.read("/site/index.html")) };
   } catch {
     return { vm, html: null };
   }
