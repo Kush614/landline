@@ -60,7 +60,10 @@ figcaption{display:flex;justify-content:space-between;align-items:center;padding
 figcaption a{color:var(--accent)}
 .frame{height:26rem;overflow:hidden;background:#fff}
 .frame.shot{display:block}
-.frame img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block}
+/* Anchor to the top-LEFT. These are full-page screenshots of left-aligned layouts,
+   so centring the crop slices the headline in half and makes a perfectly good
+   variant look broken — which would skew the very votes we are collecting. */
+.frame img{width:100%;height:100%;object-fit:cover;object-position:top left;display:block}
 iframe{width:200%;height:52rem;border:0;transform:scale(.5);transform-origin:0 0}
 form{margin-top:2rem;background:var(--surface);border:1px solid var(--border);border-radius:.75rem;padding:1.25rem}
 fieldset{border:0;padding:0;margin:0 0 1.5rem}
