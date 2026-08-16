@@ -156,8 +156,11 @@ export const pioneerAlarms: { at: string; detail: string }[] = [];
 function pioneerAlarm(detail: string, orderId?: string) {
   if (pioneerAlarms.length && pioneerAlarms.at(-1)!.detail === detail) return; // don't spam per-variant
   pioneerAlarms.push({ at: new Date().toISOString(), detail });
-  const hint = /permission_error|subscribe/i.test(detail)
-    ? "\nThe key is valid but the account has no plan. Redeem ZeroHumanHack0826 at https://agent.pioneer.ai/billing."
+  // The native /inference endpoint returns code "card_required" where the
+  // OpenAI-compatible one just says "subscribe" — a card must be on file even
+  // with the hackathon Pro promo, exactly like Render.
+  const hint = /card_required|permission_error|subscribe/i.test(detail)
+    ? "\nThe key is valid; the account needs a payment card on file (error code card_required).\nAdd one at https://agent.pioneer.ai/billing — the ZeroHumanHack0826 promo does not replace it."
     : "";
   console.error(
     `\n${"!".repeat(72)}\nPIONEER DEGRADED — copy is coming from the local template, not the open-weight model.\n${detail}${hint}\n${"!".repeat(72)}\n`,
