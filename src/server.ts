@@ -75,11 +75,14 @@ function sponsorReport() {
 app.get("/health", async () => {
   const s = sponsorReport();
   const { teracAlarms } = await import("./terac/study.js");
+  const { pioneerAlarms } = await import("./agents/copywriter.js");
   return {
     ok: true,
     ts: new Date().toISOString(),
     terac_degraded: teracAlarms.length > 0,
     terac_last_alarm: teracAlarms.at(-1) ?? null,
+    pioneer_degraded: pioneerAlarms.length > 0,
+    pioneer_last_alarm: pioneerAlarms.at(-1) ?? null,
     stripe_mode: stripeMode(),
     base_url: config.baseUrl,
     band_enabled: config.band.enabled,

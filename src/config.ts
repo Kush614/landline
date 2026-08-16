@@ -46,7 +46,10 @@ export const config = {
   pioneer: {
     apiKey: s("PIONEER_API_KEY"),
     baseUrl: s("PIONEER_BASE_URL", "https://api.pioneer.ai/v1"),
-    copyModel: s("PIONEER_COPY_MODEL", "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"),
+    // Open-weight, per the Pioneer track. Verified present in GET /v1/models —
+    // the model the spec named (NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16) does
+    // not exist on the platform.
+    copyModel: s("PIONEER_COPY_MODEL", "meta-llama/Llama-3.3-70B-Instruct"),
     piiModel: s("PIONEER_PII_MODEL", "fastino/gliner2-privacy-filter-PII-multi"),
   },
   band: {

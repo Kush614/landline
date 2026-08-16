@@ -1,5 +1,5 @@
 import { config, has } from "../config.js";
-import { req, softly } from "../http.js";
+import { req } from "../http.js";
 import { logDecision } from "../log.js";
 import type { Copy } from "../builder/types.js";
 
@@ -145,18 +145,46 @@ async function pioneerCopy(brief: string, angle: number, orderId?: string): Prom
   return parsed;
 }
 
+/**
+ * Pioneer failing is not fatal — the template fallback still ships a page — but it
+ * must be visible, or we spend the day quietly serving worse copy than we think.
+ * A `permission_error` in particular means the account has no plan, which is a
+ * one-minute fix nobody will make if it's buried in a log line.
+ */
+export const pioneerAlarms: { at: string; detail: string }[] = [];
+
+function pioneerAlarm(detail: string, orderId?: string) {
+  if (pioneerAlarms.length && pioneerAlarms.at(-1)!.detail === detail) return; // don't spam per-variant
+  pioneerAlarms.push({ at: new Date().toISOString(), detail });
+  const hint = /permission_error|subscribe/i.test(detail)
+    ? "\nThe key is valid but the account has no plan. Redeem ZeroHumanHack0826 at https://agent.pioneer.ai/billing."
+    : "";
+  console.error(
+    `\n${"!".repeat(72)}\nPIONEER DEGRADED — copy is coming from the local template, not the open-weight model.\n${detail}${hint}\n${"!".repeat(72)}\n`,
+  );
+  logDecision({ agent: "copywriter", type: "PIONEER_DEGRADED", orderId, output: detail });
+}
+
 /** Copywriter agent (§3.2) — open-weight model on Pioneer, deterministic fallback. */
 export async function writeCopy(brief: string, angle: number, orderId?: string): Promise<Copy> {
   const fb = fallbackCopy(brief, angle);
-  const copy = has.pioneer()
-    ? (await softly(`pioneer.copy[${angle}]`, () => pioneerCopy(brief, angle, orderId), null, orderId)) ?? fb
-    : fb;
+  let copy = fb;
 
+  if (has.pioneer()) {
+    try {
+      copy = (await pioneerCopy(brief, angle, orderId)) ?? fb;
+    } catch (err) {
+      pioneerAlarm(err instanceof Error ? err.message.slice(0, 300) : String(err), orderId);
+      copy = fb;
+    }
+  }
+
+  const usedModel = copy !== fb;
   logDecision({
     agent: "copywriter",
     type: "copy_written",
     orderId,
-    input: { angle, model: has.pioneer() ? config.pioneer.copyModel : "local-template" },
+    input: { angle, model: usedModel ? config.pioneer.copyModel : "local-template" },
     output: { headline: copy.headline, cta: copy.cta },
   });
   return copy;
