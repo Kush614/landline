@@ -10,6 +10,10 @@ const dir = (slug: string) => resolve(SITES_DIR, slug);
 
 export function slugify(brief: string, id: string): string {
   const base = brief
+    // Decompose accents then strip the marks, so "Rún Reykjavík" becomes
+    // "run-reykjavik" instead of losing the letters entirely ("rn-reykjavk").
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, "")
     .trim()

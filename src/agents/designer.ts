@@ -16,7 +16,10 @@ export interface DesignerOutput {
   layouts: LayoutSpec[];
 }
 
-const ECOM = /\b(sell|shop|store|product|buy|order|checkout|merch|ecommerce|e-commerce|pricing|subscription|plans?)\b/i;
+// "selling" is how people actually write it, and \bsell\b does not match it —
+// every commerce brief was silently pricing as a plain page.
+const ECOM =
+  /\b(sell(s|ing)?|shop|store|products?|buy|order|checkout|merch|ecommerce|e-commerce|pricing|subscriptions?|memberships?|plans?|classes|workshops?|passes)\b/i;
 
 /**
  * Designer agent (§3.2). Sales blocks on this landing in the Band thread — see

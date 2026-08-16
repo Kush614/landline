@@ -14,10 +14,26 @@ Return ONLY minified JSON, no markdown fence, matching:
  * Strips the request wrapper ("build me a landing page for X that does Y") down to
  * the business itself, so the fallback headline is about the customer, not the order.
  */
+/**
+ * Removes the conversational wrapper a real customer puts in front of the actual
+ * business: greetings, self-introductions, contact details. Shared by both the
+ * subject extractor and brand detection — when only one of them stripped these,
+ * "Hi I'm Dana Okonkwo, ... I run Ash & Ember" produced the brand "I'm".
+ */
+function stripOpeners(input: string): string {
+  let s = input.trim();
+  s = s.replace(/^\s*(?:hi|hey|hello)[,!\s]+/i, "");
+  s = s.replace(/^\s*(?:i'?m|i am|my name is|this is)\s+[^,.\n]{2,40}[,.]\s*/i, "");
+  s = s.replace(/^\s*(?:we'?re|we are)\s+/i, "");
+  s = s.replace(/^\s*(?:call|text|email|reach)\s+me[^,.\n]{0,60}[,.—-]\s*/i, "");
+  s = s.replace(/^\s*(?:i|we)\s+(?:run|own|have|operate)\s+/i, "");
+  return s;
+}
+
 function subjectOf(brief: string): string {
-  let s = brief.trim();
+  let s = stripOpeners(brief);
   s = s.replace(
-    /^\s*(?:(?:hi|hey|hello)[,!\s]+)?(?:can you|could you|please|i(?:'d| would) like|i need|i want|make|build|create|design|get)\s+(?:me\s+)?(?:a|an|the)?\s*/i,
+    /^\s*(?:can you|could you|please|i(?:'d| would) like|i need|i want|make|build|create|design|get)\s+(?:me\s+)?(?:a|an|the)?\s*/i,
     "",
   );
   s = s.replace(/^\s*(?:a|an|the)\s+/i, "");
@@ -48,7 +64,13 @@ function clip(s: string, max: number): string {
     const sp = cut.lastIndexOf(" ");
     out = sp > 12 ? cut.slice(0, sp) : cut;
   }
-  return out.replace(/[,;:\s]+$/, "");
+  // A headline ending "cold plunge &" reads as a truncation. Drop trailing
+  // conjunctions and symbols along with the punctuation.
+  // Also drop a trailing preposition: "knife sharpeners in" reads as a truncation.
+  return out
+    .replace(/[,;:\s]+$/, "")
+    .replace(/\s+(?:&|and|or|with|plus|\+|-|—|in|on|at|for|to|of|from|by|near)$/i, "")
+    .replace(/[,;:\s]+$/, "");
 }
 
 function fallbackCopy(brief: string, angle: number): Copy {
@@ -100,12 +122,21 @@ const STOPWORDS = new Set([
   "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
 ]);
 
-function guessBrand(brief: string): string {
+function guessBrand(raw: string): string {
+  const brief = stripOpeners(raw);
   const quoted = brief.match(/["“']([^"”']{2,30})["”']/);
   if (quoted) return quoted[1].trim();
-  const named = brief.match(/\b(?:called|named|for)\s+([A-Z][\w&'-]*(?:\s+[A-Z][\w&'-]*){0,2})/);
+  // \p{Lu}\p{L} rather than [A-Za-z]: "Rún" and "Café" are brands, not "R" and "Caf".
+  const named = brief.match(/\b(?:called|named|for)\s+(\p{Lu}[\p{L}\d&'-]*(?:\s+(?:&\s+)?\p{Lu}[\p{L}\d&'-]*){0,2})/u);
   if (named && !STOPWORDS.has(named[1].split(/\s+/)[0])) return named[1].trim();
-  const capd = [...brief.matchAll(/\b([A-Z][a-zA-Z]{2,})\b/g)].map((m) => m[1]).find((w) => !STOPWORDS.has(w));
+
+  // Prefer a multi-word proper noun, including "X & Y" — that is nearly always the
+  // business name, where a lone capitalised word is often a place or a person.
+  // {2,} and no apostrophe in the first token: "I'm Dana" is not a business name.
+  const multi = brief.match(/\b(\p{Lu}[\p{L}\d-]{2,}(?:\s+&\s+|\s+)\p{Lu}[\p{L}\d'-]{1,})\b/u);
+  if (multi && !STOPWORDS.has(multi[1].split(/\s+/)[0])) return multi[1].trim();
+
+  const capd = [...brief.matchAll(/\b(\p{Lu}[\p{L}\d-]{2,})\b/gu)].map((m) => m[1]).find((w) => !STOPWORDS.has(w));
   return capd ?? "Studio";
 }
 
