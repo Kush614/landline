@@ -116,7 +116,17 @@ app.post("/webhooks/linq", async (request, reply) => {
   }
 
   const msg = linq.parseInbound(request.body);
-  if (!msg) return reply.code(202).send({ ignored: "unparseable" });
+  if (!msg) {
+    // Log the shape, not just the fact. A silently-dropped inbound text is the
+    // worst failure this product has: the customer sees nothing at all.
+    logDecision({
+      agent: "system",
+      type: "webhook_unparseable",
+      input: (request.body as any)?.event_type ?? "unknown-event",
+      output: JSON.stringify(request.body).slice(0, 400),
+    });
+    return reply.code(202).send({ ignored: "unparseable" });
+  }
 
   // Acknowledge immediately — Linq retries slow webhooks, and builds take minutes.
   reply.code(202).send({ ok: true });

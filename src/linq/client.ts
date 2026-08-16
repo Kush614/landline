@@ -131,21 +131,39 @@ export interface InboundMessage {
   reaction?: string;
 }
 
-/** Tolerant parser — the sandbox payload shape is not fully documented. */
+/**
+ * Parses a `message.received` webhook.
+ *
+ * The documented shape (webhook_version 2026-02-03) nests these deeper than the
+ * quickstart's send payload does, which is what made our first real inbound text
+ * silently vanish — we accepted it with a 202 and then found no sender:
+ *   sender  -> data.sender_handle.handle
+ *   chat id -> data.chat.id
+ *   text    -> data.parts[].value
+ * The older flat fields are kept as fallbacks in case the sandbox differs.
+ */
 export function parseInbound(payload: any): InboundMessage | null {
   const d = payload?.data ?? payload?.message ?? payload ?? {};
-  const chatId = d.chat_id ?? d.chatId ?? payload?.chat_id ?? undefined;
 
-  const from =
-    d.from ?? d.sender ?? d.from_number ?? payload?.from ?? d.author?.handle ?? d.participant?.handle;
-  const phone = typeof from === "string" ? from : from?.handle ?? from?.phone_number ?? from?.number;
+  const chatId = d.chat?.id ?? d.chat_id ?? d.chatId ?? payload?.chat_id ?? undefined;
+
+  const sender = d.sender_handle ?? d.from ?? d.sender ?? d.author ?? d.participant ?? payload?.from;
+  const phone =
+    typeof sender === "string"
+      ? sender
+      : sender?.handle ?? sender?.phone_number ?? sender?.number ?? d.from_number;
   if (!phone) return null;
+
+  // Never act on our own outbound messages — that is an infinite reply loop.
+  if (d.direction === "outbound" || sender?.is_me === true) return null;
 
   const parts = d.parts ?? d.message?.parts ?? [];
   const textPart = Array.isArray(parts) ? parts.find((p: any) => p?.type === "text") : undefined;
   const text = (textPart?.value ?? d.text ?? d.body ?? "").toString().trim();
 
-  const reactionPart = Array.isArray(parts) ? parts.find((p: any) => p?.type === "reaction" || p?.type === "tapback") : undefined;
+  const reactionPart = Array.isArray(parts)
+    ? parts.find((p: any) => p?.type === "reaction" || p?.type === "tapback")
+    : undefined;
   const reaction = reactionPart?.value ?? d.reaction ?? d.tapback;
 
   return { phone, text, chatId, isReaction: !!reaction, reaction };

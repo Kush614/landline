@@ -72,6 +72,27 @@ section("1. Inbound webhook creates an order and opens a Band thread");
     data: { chat_id: "c1", from: "+14155550001", parts: [{ type: "text", value: BRIEF }] },
   });
   check("webhook payload parses", parsed?.phone === "+14155550001" && parsed?.text === BRIEF);
+
+  // The real message.received shape (webhook_version 2026-02-03). Our first live
+  // inbound text was dropped because sender/chat live deeper than the send payload.
+  const real = parseInbound({
+    event_type: "message.received",
+    data: {
+      chat: { id: "8f392755-6865-4b18-880a-227f9d8b458f", is_group: false },
+      direction: "inbound",
+      sender_handle: { handle: "+19518019702", is_me: false, service: "iMessage" },
+      parts: [{ type: "text", value: "A landing page for my coffee roastery in Oakland" }],
+    },
+  });
+  check("real message.received payload parses", real?.phone === "+19518019702", JSON.stringify(real));
+  check("real payload finds the chat id", real?.chatId === "8f392755-6865-4b18-880a-227f9d8b458f");
+  check("real payload finds the text", real?.text === "A landing page for my coffee roastery in Oakland");
+
+  const own = parseInbound({
+    data: { chat: { id: "c" }, direction: "outbound",
+      sender_handle: { handle: "+16462717006", is_me: true }, parts: [{ type: "text", value: "hi" }] },
+  });
+  check("our own outbound message is ignored (no reply loop)", own === null);
   // Hermetic: assert both branches explicitly rather than inheriting whatever
   // LINQ_WEBHOOK_SECRET happens to be in the developer's .env.
   {
