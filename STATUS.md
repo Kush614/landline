@@ -1,6 +1,6 @@
 # LANDLINE — STATUS
 
-Last updated: P1 + Render Workflows + Agent Pay + screenshots + demo mode.
+Last updated: deployed on Render with Linq, Stripe, Terac and Band live; Replay QA driving the deployed app.
 `npm test` → **67 passed, 0 failed, 3 skipped** · `npm run test:integration` → **16 passed, 0 failed**.
 
 **Pitching? Read [DEMO.md](./DEMO.md), not this file.**
@@ -13,7 +13,7 @@ Last updated: P1 + Render Workflows + Agent Pay + screenshots + demo mode.
 | P1 Thin loop | ✅ **done** | Text → 3 variants → QA → published page → reply with URL + price. Runs end to end with zero API keys. |
 | P2 Superserve + 3 variants | 🟡 code done, unverified | 3 variants + per-order VM + pause/resume + **headless screenshots in the VM**. Falls back to local build + local Playwright. Needs `SUPERSERVE_API_KEY` to prove. |
 | P3 Terac | 🟡 code done, unverified | Study launch + poll + winner + 12-min fallback + background upgrade. Needs `TERAC_API_KEY` and enum verification (below). |
-| P4 Replay QA | 🟡 code done, unverified | Project create → poll → bugs → fix → re-run, max 3. Static-check fallback works today. Needs `REPLAY_API_KEY`. |
+| P4 Replay QA | 🟡 CLI live, in-app blocked | Replay QA is running against the deployed app via the `replayqa` CLI (project `proj-landline-msv10imd`) and already found a blocking bug. The **in-app per-order** integration is still on its fallback — see "Replay" below. |
 | P5 Band | ✅ all 4 dependencies real | Kill-switch verified by test. Real-API posting needs `BAND_API_KEY` + `BAND_ROOM_ID`. |
 | P6 Linq polish | 🟡 mostly | Send, webhook + signature verify, typing, tapback, **Agent Pay (all 4 endpoints, 18 assertions vs a mock)** done. **iMessage App card still missing** — Linq publishes no schema for it. |
 | P7 Pioneer + Render Workflows | ✅ **code done** | Pipeline decomposed into 6 tasks in `src/pipeline/workflow.ts` + `render.yaml`. Pioneer copy + GLiNER2-PII wired with fallbacks. Needs a Render deploy to show run history. |
@@ -162,6 +162,40 @@ Roughly in order of how much they unblock:
 8. **Band** — band.ai, code `HACKBANDAUG26`, create room `landline-hq`. → `BAND_API_KEY`, `BAND_AGENT_ID`, `BAND_ROOM_ID`
 
 Drop them in `.env` and everything lights up — `/health` shows which sponsors are live.
+
+## Replay QA
+
+Running against the deployed app through the `replayqa` CLI, project
+`proj-landline-msv10imd` → `https://landline-api-g4bp.onrender.com`. No proxy or
+`app-command` is needed because the target is already public.
+
+```bash
+npx replayqa login          # browser flow, populates ~/.replay/profile/auth.json
+npx replayqa status
+npx replayqa bugs --details --save
+npx replayqa mark-bug <id> fixed
+```
+
+**First finding, and it blocked the entire project:** the app had no route at `/`, so
+the target URL returned 404 and Replay reported *"did not resolve to a usable app…
+no journeys are authored or dispatched until the URL is fixed."* Fixed by building the
+storefront at `/` (`src/pages/index.ts`), which also gives the crawler real links to
+follow — every live site, all three variants, and each order's study page.
+
+**The in-app integration is a separate thing and is NOT live.** `src/replay/qa.ts`
+calls `loop-qa.replay.io/api/v1` per order. The `ruk_` key we have authenticates the
+CLI but not that API:
+
+| call | result |
+|---|---|
+| `loop-qa.replay.io/api/v1/projects` | 401 |
+| `qa.replay.io/api/projects` (GET) | 200, but zero projects — doesn't map to the browser-login account |
+| `qa.replay.io/api/projects` (POST) | 401 |
+
+So `REPLAY_API_KEY` is deliberately **left unset**. Setting it would make `/health`
+report `replay=LIVE` while every QA call 401s into the static-check fallback — the
+exact silent degradation the Terac alarms exist to prevent. Ask Replay for a key that
+can create projects (the `lqa_` kind their REST docs describe) to turn this on.
 
 ## Doc traps
 

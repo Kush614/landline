@@ -26,6 +26,7 @@ npm run seed-demo          # only if the dashboard is empty — see "Seeding" be
 **Tabs to have open, left to right, in this order:**
 
 1. iMessage conversation with the LANDLINE number (full screen, big text)
+0. `$BASE_URL/` — the storefront, good to open on
 2. Band room `landline-hq`
 3. `$BASE_URL/study/<a seeded order id>` — the Terac panelist page
 4. Replay QA dashboard (the project for the most recent order)
