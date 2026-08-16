@@ -268,15 +268,37 @@ app.post<{ Params: { orderId: string }; Body: Record<string, string> }>(
     if (!order) return reply.code(404).send("Study not found");
 
     const b = req.body ?? {};
+
+    /**
+     * This form is open to the public internet, and its output becomes the
+     * "X% of testers preferred this" figure we say on stage and text to customers.
+     * A vote for a variant that doesn't exist still counts toward the denominator
+     * in tally(), so unvalidated input silently deflates that number. Validate
+     * against the order's real variants, and reject rather than clamp — a bad
+     * submission is not a quiet correction, it's a bad submission.
+     */
+    const valid = new Set(variantsFor(order.id).map((v) => v.idx));
     const idx = Number(b.variant_idx);
-    if (!Number.isInteger(idx)) return reply.code(400).send("pick a version");
+    if (!Number.isInteger(idx) || !valid.has(idx)) {
+      return reply.code(400).send("pick one of the versions shown");
+    }
+
+    const clearest = Number(b.clearest_idx);
+    const trust = Number(b.trust);
+    const wouldPay = Number(b.would_pay);
+    if (b.trust !== undefined && (!Number.isInteger(trust) || trust < 1 || trust > 5)) {
+      return reply.code(400).send("trust must be 1-5");
+    }
+    if (b.would_pay !== undefined && wouldPay !== 0 && wouldPay !== 1) {
+      return reply.code(400).send("would_pay must be yes or no");
+    }
 
     recordVote({
       order_id: order.id,
       variant_idx: idx,
-      clearest_idx: Number.isInteger(Number(b.clearest_idx)) ? Number(b.clearest_idx) : null,
-      trust: b.trust ? Number(b.trust) : null,
-      would_pay: b.would_pay !== undefined ? Number(b.would_pay) : null,
+      clearest_idx: valid.has(clearest) ? clearest : null,
+      trust: b.trust !== undefined ? trust : null,
+      would_pay: b.would_pay !== undefined ? wouldPay : null,
       comment: b.comment?.slice(0, 500) || null,
       voter: (req.headers["x-forwarded-for"] as string)?.split(",")[0] ?? null,
     });

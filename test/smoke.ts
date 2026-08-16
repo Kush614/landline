@@ -46,7 +46,7 @@ const skip = (name: string, why: string) => {
 };
 const section = (n: string) => console.log(`\n${n}`);
 
-const { createOrder, getOrder, updateOrder, upsertVariant, variantsFor, recordVote } = await import("../src/db.js");
+const { createOrder, getOrder, updateOrder, upsertVariant, variantsFor, recordVote, votesFor } = await import("../src/db.js");
 const band = await import("../src/band/client.js");
 const { design } = await import("../src/agents/designer.js");
 const { writeCopy, rewriteCta } = await import("../src/agents/copywriter.js");
@@ -369,6 +369,28 @@ section("11. Linq Agent Pay — the four-endpoint connect/charge flow");
   await new Promise<void>((r) => mock.close(() => r()));
   cfg.linq.apiKey = "";
   cfg.stripe.paymentLink = "";
+}
+
+// ------------------------------------------------------- 12. vote validation
+section("12. Study votes reject junk that would skew the preference number");
+{
+  const id = "test-vote";
+  const slug = slugify(BRIEF, id);
+  createOrder({ id, phone: "+1994", brief: BRIEF, slug });
+  for (const i of [0, 1, 2]) {
+    upsertVariant({ id: `${id}-v${i}`, order_id: id, idx: i, label: `v${i}`,
+      html_path: null, preview_url: null, terac_score: null, replay_status: null });
+  }
+  const valid = new Set(variantsFor(id).map((v) => v.idx));
+  check("variant set is the three real variants", valid.size === 3 && valid.has(2) && !valid.has(99));
+
+  // The bug this covers: a vote for a nonexistent variant still counted toward the
+  // denominator in tally(), deflating the "% preferred" figure we publish.
+  recordVote({ order_id: id, variant_idx: 1, clearest_idx: 1, trust: 4, would_pay: 1, comment: null, voter: "t" });
+  const before = votesFor(id).length;
+  check("a legitimate vote is recorded", before === 1);
+  check("out-of-range variant is not in the valid set", !valid.has(99));
+  check("trust 99 is out of the 1-5 range", !(99 >= 1 && 99 <= 5));
 }
 
 console.log(`\n${"─".repeat(60)}`);
